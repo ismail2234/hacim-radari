@@ -13,7 +13,7 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "SENIN_BOT_TOKENIN_BUR
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "SENIN_CHAT_ID_BURAYA")
 
 # Profesyonel Radar Ayarları
-MIN_VOLUME_USD = 15000  # 8 saniyede en az 15.000$ hacim girişi
+MIN_VOLUME_USD = 1000  # 8 saniyede en az 15.000$ hacim girişi
 CHECK_INTERVAL = 8      # 8 saniyede bir tara
 COOLDOWN_TIME = 300     # Aynı coin için 5 dakika (300 sn) bildirim engeli
 

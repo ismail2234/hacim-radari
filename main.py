@@ -1,123 +1,182 @@
 
-import os
+          
 import time
 import requests
-import threading
+import os
 from flask import Flask
+from threading import Thread
 
+# ==========================================
+# 1. AYARLAR VE TELEGRAM BİLGİLERİ
+# ==========================================
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "SENIN_BOT_TOKENIN_BURAYA")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "SENIN_CHAT_ID_BURAYA")
+
+# Profesyonel Radar Ayarları
+MIN_VOLUME_USD = 15000  # 8 saniyede en az 15.000$ hacim girişi
+CHECK_INTERVAL = 8      # 8 saniyede bir tara
+COOLDOWN_TIME = 300     # Aynı coin için 5 dakika (300 sn) bildirim engeli
+
+cooldown_tracker = {}
+previous_volumes = {}
+previous_prices = {}
+
+# ==========================================
+# 2. FLASK WEB SUNUCUSU (RENDER İÇİN)
+# ==========================================
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Hacim Radarı Botu Aktif!"
+    return "Hacim Radari PRO Ultimate (v2.5) Aktif ve Taramaya Devam Ediyor!"
 
 def run_flask():
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
-# Telegram Ayarları (Render Environment Variables üzerinden çekilir)
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
-CHAT_ID = os.environ.get("CHAT_ID", "")
+# ==========================================
+# 3. PROFESYONEL İNDİKATÖR (RSI HESAPLAMA)
+# ==========================================
+def calculate_rsi(symbol, period=14):
+    try:
+        url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=15m&limit={period+1}"
+        response = requests.get(url, timeout=5).json()
+        
+        changes = []
+        for i in range(1, len(response)):
+            close_now = float(response[i][4])
+            close_prev = float(response[i-1][4])
+            changes.append(close_now - close_prev)
+            
+        gains = [c for c in changes if c > 0]
+        losses = [abs(c) for c in changes if c < 0]
+        
+        avg_gain = sum(gains) / period if gains else 0.001
+        avg_loss = sum(losses) / period if losses else 0.001
+        
+        rs = avg_gain / avg_loss
+        rsi = 100 - (100 / (1 + rs))
+        return round(rsi, 1)
+    except:
+        return 50.0  # Ağ hatası olursa nötr değer dön
 
-COOLDOWN_SANIYE = 300
-TARAMA_ARALIGI = 8
+def get_rsi_status(rsi):
+    if rsi >= 70:
+        return f"🔴 {rsi} (Aşırı Alım - Tepeden Alma!)"
+    elif rsi <= 30:
+        return f"🟢 {rsi} (Dip Bölgesi - Fırsat Olabilir)"
+    else:
+        return f"🟡 {rsi} (Normal Trend Bölgesi)"
 
-son_bildirim_zamanlari = {}
-gecmis_toplam_hacim = {}
-
-def telegram_mesaj_gonder(mesaj, sembol):
-    if not BOT_TOKEN or not CHAT_ID:
-        print("BOT_TOKEN veya CHAT_ID eksik!")
-        return False
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+# ==========================================
+# 4. TELEGRAM MESAJ GÖNDERİCİ
+# ==========================================
+def send_telegram_message(message):
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
-        "chat_id": CHAT_ID,
-        "text": mesaj,
-        "parse_mode": "HTML"
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True
     }
     try:
-        r = requests.post(url, json=payload, timeout=5)
-        return r.status_code == 200
+        requests.post(url, json=payload, timeout=5)
     except Exception as e:
-        print("Telegram gonderme hatasi:", e)
-        return False
+        print(f"Telegram Gönderim Hatası: {e}")
 
-def btc_durum_al():
-    try:
-        url = "https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT"
-        res = requests.get(url, timeout=5).json()
-        return float(res.get("priceChangePercent", 0))
-    except:
-        return 0.0
-
-def bot_thread():
-    print("Bot taraması başlatıldı...")
+# ==========================================
+# 5. ANA TARAMA DÖNGÜSÜ (PRO ULTIMATE)
+# ==========================================
+def start_scanner():
+    global previous_volumes, previous_prices, cooldown_tracker
+    print("🚀 PRO Ultimate Hacim Radarı Başlatıldı...")
+    
     while True:
         try:
-            btc_degisim = btc_durum_al()
-            url = "https://api.binance.com/api/v3/ticker/24hr"
-            response = requests.get(url, timeout=10)
-            if response.status_code != 200:
-                time.sleep(5)
-                continue
-
-            veri = response.json()
-            simdiki_zaman = time.time()
-
-            for item in veri:
-                sembol = item.get("symbol", "")
-                if not sembol.endswith("USDT"):
+            response = requests.get("https://api.binance.com/api/v3/ticker/24hr", timeout=10)
+            data = response.json()
+            
+            # BTC Durumunu Çek
+            btc_change = 0.0
+            for item in data:
+                if item["symbol"] == "BTCUSDT":
+                    btc_change = float(item["priceChangePercent"])
+                    break
+            
+            btc_icon = "🟢" if btc_change >= 0 else "🔴"
+            current_time = time.time()
+            
+            for coin in data:
+                symbol = coin["symbol"]
+                
+                # Sadece USDT paritelerini tara (kaldıraçlı tokenları ele)
+                if not symbol.endswith("USDT") or "BULL" in symbol or "BEAR" in symbol:
                     continue
-
-                hacim = float(item.get("quoteVolume", 0))
-                fiyat = float(item.get("lastPrice", 0))
-                degisim = float(item.get("priceChangePercent", 0))
-
-                if sembol in gecmis_toplam_hacim:
-                    onceki_hacim = gecmis_toplam_hacim[sembol]
-                    hacim_farki = hacim - onceki_hacim
-
-                    if hacim_farki >= 30000:
-                        son_zaman = son_bildirim_zamanlari.get(sembol, 0)
-                        if simdiki_zaman - son_zaman > COOLDOWN_SANIYE:
-                            fiyat_str = f"{fiyat:.6f}" if fiyat < 1 else f"{fiyat:.2f}"
-                            btc_uyari = (
-                                "\n⚠️ <i>Dikkat: BTC Düşüşte!</i>"
-                                if btc_degisim < -1.5
-                                else ""
-                            )
-
-                            if hacim_farki >= 100000:
-                                yildiz = "⭐⭐⭐ (ÇOK GÜÇLÜ BALİNA)"
-                            elif hacim_farki >= 60000:
-                                yildiz = "⭐⭐ (ORTA-YÜKSEK)"
+                
+                quote_volume = float(coin["quoteVolume"])
+                price = float(coin["lastPrice"])
+                change_24h = float(coin["priceChangePercent"])
+                
+                if symbol in previous_volumes and symbol in previous_prices:
+                    volume_diff = quote_volume - previous_volumes[symbol]
+                    price_diff = price - previous_prices[symbol]
+                    
+                    # Hacim şartı sağlandı mı?
+                    if volume_diff >= MIN_VOLUME_USD:
+                        last_alert_time = cooldown_tracker.get(symbol, 0)
+                        
+                        # 5 dakikalık cooldown kontrolü
+                        if current_time - last_alert_time > COOLDOWN_TIME:
+                            cooldown_tracker[symbol] = current_time
+                            
+                            # Hacmin Yönü (Alım mı Satım mı?)
+                            if price_diff > 0:
+                                direction_text = "🟢 <b>ALIM BASKISI (Para Girişi)</b>"
+                            elif price_diff < 0:
+                                direction_text = "🔴 <b>SATIŞ BASKISI (Dump Riski)</b>"
                             else:
-                                yildiz = "⭐ (STANDART)"
-
-                            mesaj = (
-                                f"🔥 <b>HACİM SİNYALİ YAKALANDI!</b> 🔥\n"
-                                f"Güç: {yildiz}\n\n"
-                                f"🪙 <b>Coin:</b> #{sembol}\n"
-                                f"💵 <b>Son 8s Hacim:</b> +${hacim_farki:,.0f}\n"
-                                f"📈 <b>Fiyat:</b> {fiyat_str} USDT\n"
-                                f"📊 <b>24s Değişim:</b> %{degisim:+.2f}\n"
-                                f"🟢 <b>BTC Durumu:</b> %{btc_degisim:+.2f}"
-                                f"{btc_uyari}"
+                                direction_text = "🟡 <b>YATAY HACİM GİRİŞİ</b>"
+                            
+                            # Yıldız belirleme
+                            stars = "⭐⭐⭐ 🐋" if volume_diff >= 50000 else "⭐⭐"
+                            
+                            # RSI Hesapla
+                            rsi_value = calculate_rsi(symbol)
+                            rsi_text = get_rsi_status(rsi_value)
+                            
+                            # Grafik Linki
+                            clean_symbol = symbol.replace("USDT", "")
+                            chart_url = f"https://www.binance.com/tr/trade/{clean_symbol}_USDT"
+                            
+                            # Telegram Mesaj Şablonu
+                            msg = (
+                                f"🔥 <b>GÜÇLÜ HACİM SİNYALİ!</b> {stars}\n\n"
+                                f"🪙 <b>Coin:</b> #{symbol}\n"
+                                f"⚡ <b>Yön:</b> {direction_text}\n"
+                                f"💵 <b>8s Hacim:</b> +${volume_diff:,.0f}\n"
+                                f"💰 <b>Anlık Fiyat:</b> {price} USDT\n"
+                                f"📈 <b>24s Değişim:</b> %{change_24h:.2f}\n"
+                                f"📊 <b>15m RSI:</b> {rsi_text}\n"
+                                f"{btc_icon} <b>BTC Durumu:</b> %{btc_change:.2f}\n\n"
+                                f"🔗 <a href='{chart_url}'>Binance Grafiğini Aç</a>"
                             )
-
-                            if telegram_mesaj_gonder(mesaj, sembol):
-                                son_bildirim_zamanlari[sembol] = simdiki_zaman
-
-                gecmis_toplam_hacim[sembol] = hacim
-
-            time.sleep(TARAMA_ARALIGI)
+                            
+                            send_telegram_message(msg)
+                
+                previous_volumes[symbol] = quote_volume
+                previous_prices[symbol] = price
+                
         except Exception as e:
-            print("Bot hatasi:", e)
-            time.sleep(5)
+            print(f"Tarama Hatası (Önemsiz): {e}")
+            
+        time.sleep(CHECK_INTERVAL)
 
+# ==========================================
+# 6. SİSTEMİ ÇALIŞTIR
+# ==========================================
 if __name__ == "__main__":
-    t = threading.Thread(target=bot_thread)
-    t.daemon = True
-    t.start()
-    run_flask()
-          
+    flask_thread = Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
+    
+    start_scanner()

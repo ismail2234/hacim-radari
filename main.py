@@ -1,4 +1,3 @@
-
 import time
 import requests
 import os
@@ -8,8 +7,8 @@ from threading import Thread
 # ==========================================
 # 1. AYARLAR VE TELEGRAM BİLGİLERİ
 # ==========================================
-TELEGRAM_BOT_TOKEN = os.environ.get("8740764565:AAFwW-VRxTQQ_K0XFHtlwFteYGbefV0sjJM)
-TELEGRAM_CHAT_ID = os.environ.get(937967050)
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8740764565:AAFwW-VRxTQQ_K0XFHtlwFteYGbefV0sjJM")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "937967050")
 
 # Profesyonel Radar Ayarları (Test için 1000$ yaptık, sonra 15000$ yapabilirsin)
 MIN_VOLUME_USD = 1000  
@@ -170,3 +169,4 @@ if __name__ == "__main__":
     flask_thread.start()
     
     start_scanner()
+        

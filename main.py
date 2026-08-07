@@ -11,8 +11,8 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8740764565:AAFwW-VRxT
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "937967050")
 
 # Profesyonel Radar Ayarları (Test için 1000$ yaptık, sonra 15000$ yapabilirsin)
-MIN_VOLUME_USD = 100
-CHECK_INTERVAL = 8      
+MIN_VOLUME_USD = 1500
+CHECK_INTERVAL = 8    
 COOLDOWN_TIME = 300     
 
 cooldown_tracker = {}

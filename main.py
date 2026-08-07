@@ -1,167 +1,136 @@
 
 import time
 import requests
+import pandas as pd
 from flask import Flask
 from threading import Thread
 
-# --- AYARLAR ---
-TELEGRAM_BOT_TOKEN = "8740764565:AAFwW-VRxTQQ_K0XFHtlwFteYGbefV0sjJM"
+
+# ================= AYARLAR =================
+
+TELEGRAM_BOT_TOKEN = "BURAYA_TOKEN"
 TELEGRAM_CHAT_ID = "937967050"
 
-MIN_VOLUME_USD = 15000
-SCAN_INTERVAL = 300  # 5 dakika
-
-# Tekrar mesaj engeli
-sent_coins = {}
-
-# Flask
-app = Flask('')
+MIN_VOLUME_USD = 100000
+SCAN_INTERVAL = 300
 
 
-@app.route('/')
+# Daha önce gönderilen sinyaller
+sent_signals = {}
+
+
+# ================= FLASK =================
+
+app = Flask(__name__)
+
+
+@app.route("/")
 def home():
-    return "Bot aktif ve çalışıyor!"
+    return "Binance Radar Aktif!"
 
 
 def run_flask():
-    app.run(host='0.0.0.0', port=10000)
+    app.run(host="0.0.0.0", port=10000)
 
 
-# Telegram gönderim
-def send_telegram_message(message):
 
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+# ================= TELEGRAM =================
 
-    payload = {
+def send_telegram(message):
+
+    url = (
+        f"https://api.telegram.org/"
+        f"bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    )
+
+    data = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": message,
         "parse_mode": "Markdown"
     }
 
     try:
-        response = requests.post(
+        requests.post(
             url,
-            json=payload,
+            json=data,
             timeout=10
         )
 
-        if response.status_code != 200:
-            print("Telegram cevap:", response.text)
-
     except Exception as e:
-        print("Telegram hatası:", e)
+        print("Telegram hata:", e)
 
 
 
-# Binance veri çekme
-def get_binance_prices():
+# ================= BINANCE =================
 
-    url = "https://api.binance.com/api/v3/ticker/24hr"
+def get_tickers():
+
+    url = (
+        "https://api.binance.com/"
+        "api/v3/ticker/24hr"
+    )
 
     try:
 
-        response = requests.get(
+        r = requests.get(
             url,
             timeout=10
         )
 
-        return response.json()
+        return r.json()
 
     except Exception as e:
 
-        print("Binance veri hatası:", e)
+        print("Ticker hata:", e)
+        return []
+
+
+
+def get_klines(symbol):
+
+    url = (
+        "https://api.binance.com/"
+        "api/v3/klines"
+    )
+
+    params = {
+        "symbol": symbol,
+        "interval": "15m",
+        "limit": 100
+    }
+
+    try:
+
+        r = requests.get(
+            url,
+            params=params,
+            timeout=10
+        )
+
+        return r.json()
+
+    except Exception:
 
         return []
 
 
 
-# Tarama sistemi
-def start_scanner():
+# ================= RSI =================
 
-    print("🚀 Hacim radarı başladı")
+def calculate_rsi(closes, period=14):
 
-    while True:
+    series = pd.Series(closes)
 
-        try:
+    delta = series.diff()
 
-            data = get_binance_prices()
+    gain = delta.where(delta > 0, 0)
+    loss = -delta.where(delta < 0, 0)
 
-            current_time = time.time()
+    avg_gain = gain.rolling(period).mean()
+    avg_loss = loss.rolling(period).mean()
 
+    rs = avg_gain / avg_loss
 
-            for item in data:
+    rsi = 100 - (100 / (1 + rs))
 
-                symbol = item.get("symbol")
-
-
-                if not symbol.endswith("USDT"):
-                    continue
-
-
-                volume = float(item["quoteVolume"])
-                price = float(item["lastPrice"])
-                change = float(item["priceChangePercent"])
-
-
-                if volume < MIN_VOLUME_USD:
-                    continue
-
-
-                # 2 saat içinde tekrar bildirme
-                if symbol in sent_coins:
-
-                    if current_time - sent_coins[symbol] < 7200:
-                        continue
-
-
-                sent_coins[symbol] = current_time
-
-
-                message = (
-                    f"🔥 *GÜÇLÜ HACİM SİNYALİ* 🔥\n\n"
-                    f"🪙 Coin: #{symbol}\n"
-                    f"💰 Fiyat: {price} USDT\n"
-                    f"📊 24s Değişim: %{change:+.2f}\n"
-                    f"🔥 24s Hacim: ${volume:,.0f}\n\n"
-                    f"📱 Grafiği kontrol edin."
-                )
-
-
-                send_telegram_message(message)
-
-                time.sleep(2)
-
-
-
-            print("Tarama tamamlandı")
-
-            time.sleep(SCAN_INTERVAL)
-
-
-
-        except Exception as e:
-
-            print("Tarama döngü hatası:", e)
-
-            time.sleep(20)
-
-
-
-# Başlat
-if __name__ == "__main__":
-
-
-    flask_thread = Thread(
-        target=run_flask,
-        daemon=True
-    )
-
-    flask_thread.start()
-
-
-    send_telegram_message(
-        "🚀 Bot başladı! Hacim radarı aktif."
-    )
-
-
-    start_scanner()
+    return float(rsi.iloc[-1])

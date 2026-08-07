@@ -291,4 +291,14 @@ if __name__ == "__main__":
 
     # Tarayıcıyı ana akışta başlat
     scanner()
-    
+    if __name__ == "__main__":
+    # Flask sunucusunu arka planda başlat
+    flask_thread = Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+
+    # TEST: Kodun Telegram'a mesaj atıp atamadığını hemen görmek için:
+    send_telegram("🔔 Binance Radar Test Mesajı: Sistem başarıyla başlatıldı ve çalışıyor!")
+
+    # Tarayıcıyı ana akışta başlat
+    scanner()
+

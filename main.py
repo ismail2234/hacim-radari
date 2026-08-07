@@ -299,8 +299,6 @@ def scanner():
             print("Tarama hatası:", e)
 
             time.sleep(20)
-# ===# ================= BAŞLAT =================
-
 if __name__ == "__main__":
     # Flask sunucusunu arka planda (daemon thread) çalıştır
     flask_thread = Thread(target=run_flask, daemon=True)
@@ -310,6 +308,6 @@ if __name__ == "__main__":
         "🚀 Binance Global RSI+MACD Radar aktif!"
     )
 
-    # Tarayıcıyı ana akışta başlat ki çıktıları loglarda hemen görebilelim
+    # Tarayıcıyı ana akışta başlat
     scanner()
-
+    

@@ -136,13 +136,27 @@ def calculate_rsi(closes, period=14):
 
 def calculate_macd(closes):
 
-    series = pd.Series(closes)
+    def ema(data, period):
+    k = 2 / (period + 1)
+    ema_value = data[0]
 
-    ema12 = series.ewm(span=12).mean()
-    ema26 = series.ewm(span=26).mean()
+    for price in data[1:]:
+        ema_value = (price * k) + (ema_value * (1 - k))
 
-    macd = ema12 - ema26
-    signal = macd.ewm(span=9).mean()
+    return ema_value
+
+
+def calculate_macd(closes):
+
+    ema12 = ema(closes[-50:], 12)
+    ema26 = ema(closes[-50:], 26)
+
+    macd_value = ema12 - ema26
+
+    if macd_value > 0:
+        return "YUKARI"
+
+    return "ZAYIF"
 
     if macd.iloc[-1] > signal.iloc[-1]:
         return "YUKARI"

@@ -1,3 +1,6 @@
+flask
 requests
 pandas
-flask
+numpy
+ta
+python-dotenv

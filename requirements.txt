@@ -1,6 +1,5 @@
-flask
-requests
+Flask
 pandas
-numpy
-ta
-python-dotenv
+requests
+gunicorn
+

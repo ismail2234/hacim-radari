@@ -219,36 +219,30 @@ def scanner():
 
             now = time.time()
 
-
             for coin in tickers:
-
                 symbol = coin["symbol"]
-
 
                 if not symbol.endswith("USDT"):
                     continue
-
 
                 volume = float(
                     coin["quoteVolume"]
                 )
 
-
                 if volume < MIN_VOLUME_USD:
                     continue
 
-
+                # Hangi coinlerin tarandığını loglarda görmek için:
+                print(f"İnceleniyor: {symbol} (Hacim: {volume:.0f})")
 
                 # tekrar sinyal engeli
-
                 if symbol in sent_signals:
-
                     if now - sent_signals[symbol] < 7200:
                         continue
 
-
-
                 result = analyze_coin(symbol)
+                
+            
 
 
                 if result:

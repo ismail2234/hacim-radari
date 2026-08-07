@@ -168,5 +168,8 @@ if __name__ == "__main__":
     flask_thread.daemon = True
     flask_thread.start()
     
+    # Test mesajı gönderelim
+    send_telegram_message("🚀 Bot başarıyla başlatıldı, sistem aktif!")
+    
     start_scanner()
-        
+    

@@ -8,7 +8,7 @@ from threading import Thread
 
 # ================= AYARLAR =================
 
-TELEGRAM_BOT_TOKEN = "7547167571:AAF8u7jXvK7fPZ3yF4yXw7k3..." # Kendi token'ını buraya yazabilirsin
+TELEGRAM_BOT_TOKEN = "7547167571:AAF8u7jXvK7fPZ3yF4yXw7k3..." 
 TELEGRAM_CHAT_ID = "937967050"
 
 MIN_VOLUME_USD = 15000

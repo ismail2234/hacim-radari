@@ -133,4 +133,180 @@ def calculate_rsi(closes, period=14):
 
     rsi = 100 - (100 / (1 + rs))
 
-    return float(rsi.iloc[-1])
+    return float(rsi.iloc[-1]) # ================= MACD =================
+
+def calculate_macd(closes):
+
+    series = pd.Series(closes)
+
+    ema12 = series.ewm(span=12).mean()
+    ema26 = series.ewm(span=26).mean()
+
+    macd = ema12 - ema26
+    signal = macd.ewm(span=9).mean()
+
+    if macd.iloc[-1] > signal.iloc[-1]:
+        return "YUKARI"
+
+    return "ZAYIF"
+
+
+
+# ================= ANALİZ =================
+
+def analyze_coin(symbol):
+
+    candles = get_klines(symbol)
+
+    if not candles or len(candles) < 50:
+        return None
+
+
+    closes = []
+    volumes = []
+
+
+    for c in candles:
+
+        closes.append(float(c[4]))
+        volumes.append(float(c[5]))
+
+
+
+    rsi = calculate_rsi(closes)
+
+    macd = calculate_macd(closes)
+
+
+    # Son hacim / ortalama hacim
+
+    last_volume = volumes[-1]
+
+    avg_volume = sum(volumes[-20:-1]) / 19
+
+    volume_power = (last_volume / avg_volume) * 100
+
+
+
+    if (
+        rsi >= 40
+        and rsi <= 65
+        and macd == "YUKARI"
+        and volume_power >= 150
+    ):
+
+        return {
+            "rsi": round(rsi,2),
+            "macd": macd,
+            "volume": round(volume_power,2),
+            "price": closes[-1]
+        }
+
+
+    return None
+
+
+
+
+# ================= TARAMA =================
+
+def scanner():
+
+    print("🚀 Binance RSI MACD Radar başladı")
+
+
+    while True:
+
+        try:
+
+            tickers = get_tickers()
+
+            now = time.time()
+
+
+            for coin in tickers:
+
+                symbol = coin["symbol"]
+
+
+                if not symbol.endswith("USDT"):
+                    continue
+
+
+                volume = float(
+                    coin["quoteVolume"]
+                )
+
+
+                if volume < MIN_VOLUME_USD:
+                    continue
+
+
+
+                # tekrar sinyal engeli
+
+                if symbol in sent_signals:
+
+                    if now - sent_signals[symbol] < 7200:
+                        continue
+
+
+
+                result = analyze_coin(symbol)
+
+
+                if result:
+
+
+                    sent_signals[symbol] = now
+
+
+                    message = (
+                        f"🚨 *POTANSİYEL HAREKET*\n\n"
+                        f"🪙 Coin: #{symbol}\n"
+                        f"💰 Fiyat: {result['price']} USDT\n"
+                        f"📊 RSI: {result['rsi']}\n"
+                        f"🟢 MACD: {result['macd']}\n"
+                        f"🔥 Hacim Gücü: %{result['volume']}\n\n"
+                        f"Grafik kontrol edilmeli."
+                    )
+
+
+                    send_telegram(message)
+
+
+                    time.sleep(2)
+
+
+
+            print("Tarama tamamlandı")
+
+            time.sleep(SCAN_INTERVAL)
+
+
+
+        except Exception as e:
+
+            print("Tarama hatası:", e)
+
+            time.sleep(20)
+
+
+
+
+# ================= BAŞLAT =================
+
+if __name__ == "__main__":
+
+    Thread(
+        target=run_flask,
+        daemon=True
+    ).start()
+
+
+    send_telegram(
+        "🚀 Binance Global RSI+MACD Radar aktif!"
+    )
+
+
+    scanner()

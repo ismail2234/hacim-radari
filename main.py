@@ -67,7 +67,7 @@ def analyze_coin(symbol):
     rsi = calculate_rsi(closes)
     vol_power = (volumes[-2] / (sum(volumes[-21:-2])/19)) * 100
     buy_pressure = ((taker_buys[-2] / volumes[-2]) * 100) if volumes[-2] > 0 else 0
-
+    
     
     score = 0
     if 40 < rsi < 65: score += 25

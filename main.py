@@ -1,7 +1,6 @@
 
 import time
-import requests
-import pandas as pd
+import reque
 from flask import Flask
 from threading import Thread
 

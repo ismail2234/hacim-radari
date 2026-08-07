@@ -1,5 +1,4 @@
 
-          
 import time
 import requests
 import os
@@ -9,13 +8,13 @@ from threading import Thread
 # ==========================================
 # 1. AYARLAR VE TELEGRAM BİLGİLERİ
 # ==========================================
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "SENIN_BOT_TOKENIN_BURAYA")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "SENIN_CHAT_ID_BURAYA")
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8740764565:AAFwW-VRxTQQ_K0XFHtlwFteYGbefV0sjJM")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "937967050")
 
-# Profesyonel Radar Ayarları
-MIN_VOLUME_USD = 1000  # 8 saniyede en az 15.000$ hacim girişi
-CHECK_INTERVAL = 8      # 8 saniyede bir tara
-COOLDOWN_TIME = 300     # Aynı coin için 5 dakika (300 sn) bildirim engeli
+# Profesyonel Radar Ayarları (Test için 1000$ yaptık, sonra 15000$ yapabilirsin)
+MIN_VOLUME_USD = 1000  
+CHECK_INTERVAL = 8      
+COOLDOWN_TIME = 300     
 
 cooldown_tracker = {}
 previous_volumes = {}
@@ -58,7 +57,7 @@ def calculate_rsi(symbol, period=14):
         rsi = 100 - (100 / (1 + rs))
         return round(rsi, 1)
     except:
-        return 50.0  # Ağ hatası olursa nötr değer dön
+        return 50.0  
 
 def get_rsi_status(rsi):
     if rsi >= 70:
@@ -96,7 +95,6 @@ def start_scanner():
             response = requests.get("https://api.binance.com/api/v3/ticker/24hr", timeout=10)
             data = response.json()
             
-            # BTC Durumunu Çek
             btc_change = 0.0
             for item in data:
                 if item["symbol"] == "BTCUSDT":
@@ -109,7 +107,6 @@ def start_scanner():
             for coin in data:
                 symbol = coin["symbol"]
                 
-                # Sadece USDT paritelerini tara (kaldıraçlı tokenları ele)
                 if not symbol.endswith("USDT") or "BULL" in symbol or "BEAR" in symbol:
                     continue
                 
@@ -121,15 +118,12 @@ def start_scanner():
                     volume_diff = quote_volume - previous_volumes[symbol]
                     price_diff = price - previous_prices[symbol]
                     
-                    # Hacim şartı sağlandı mı?
                     if volume_diff >= MIN_VOLUME_USD:
                         last_alert_time = cooldown_tracker.get(symbol, 0)
                         
-                        # 5 dakikalık cooldown kontrolü
                         if current_time - last_alert_time > COOLDOWN_TIME:
                             cooldown_tracker[symbol] = current_time
                             
-                            # Hacmin Yönü (Alım mı Satım mı?)
                             if price_diff > 0:
                                 direction_text = "🟢 <b>ALIM BASKISI (Para Girişi)</b>"
                             elif price_diff < 0:
@@ -137,18 +131,14 @@ def start_scanner():
                             else:
                                 direction_text = "🟡 <b>YATAY HACİM GİRİŞİ</b>"
                             
-                            # Yıldız belirleme
                             stars = "⭐⭐⭐ 🐋" if volume_diff >= 50000 else "⭐⭐"
                             
-                            # RSI Hesapla
                             rsi_value = calculate_rsi(symbol)
                             rsi_text = get_rsi_status(rsi_value)
                             
-                            # Grafik Linki
                             clean_symbol = symbol.replace("USDT", "")
                             chart_url = f"https://www.binance.com/tr/trade/{clean_symbol}_USDT"
                             
-                            # Telegram Mesaj Şablonu
                             msg = (
                                 f"🔥 <b>GÜÇLÜ HACİM SİNYALİ!</b> {stars}\n\n"
                                 f"🪙 <b>Coin:</b> #{symbol}\n"

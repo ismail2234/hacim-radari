@@ -161,59 +161,46 @@ def calculate_macd(closes):
 
 
 
-# ================= ANALİZ =================
 
-def analyze_coin(symbol):
+    # ================= ANALİZ =================
 
-    candles = get_klines(symbol)
+    def analyze_coin(symbol):
+        candles = get_klines(symbol)
 
-    if not candles or len(candles) < 50:
+        if not candles or len(candles) < 50:
+            return None
+
+        closes = []
+        volumes = []
+
+        for c in candles:
+            closes.append(float(c[4]))
+            volumes.append(float(c[5]))
+
+        rsi = calculate_rsi(closes)
+        macd = calculate_macd(closes)
+
+        # BURAYI GÜNCELLEDİK:
+        # Son kapanan tam mumun hacmi üzerinden hesaplama yapıyoruz
+        last_volume = volumes[-2] 
+        avg_volume = sum(volumes[-21:-2]) / 19
+        volume_power = (last_volume / avg_volume) * 100
+
+        if (
+            rsi >= 40
+            and rsi <= 65
+            and macd == "YUKARI"
+            and volume_power >= 150
+        ):
+            return {
+                "rsi": round(rsi,2),
+                "macd": macd,
+                "volume": round(volume_power,2),
+                "price": closes[-2] # Fiyatı da kapanan mumun fiyatı alalım
+            }
+
         return None
-
-
-    closes = []
-    volumes = []
-
-
-    for c in candles:
-
-        closes.append(float(c[4]))
-        volumes.append(float(c[5]))
-
-
-
-    rsi = calculate_rsi(closes)
-
-    macd = calculate_macd(closes)
-
-
-    # Son hacim / ortalama hacim
-
-    last_volume = volumes[-1]
-
-    avg_volume = sum(volumes[-20:-1]) / 19
-
-    volume_power = (last_volume / avg_volume) * 100
-
-
-
-    if (
-        rsi >= 40
-        and rsi <= 65
-        and macd == "YUKARI"
-        and volume_power >= 150
-    ):
-
-        return {
-            "rsi": round(rsi,2),
-            "macd": macd,
-            "volume": round(volume_power,2),
-            "price": closes[-1]
-        }
-
-
-    return None
-
+        
 
 
 

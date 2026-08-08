@@ -12,8 +12,8 @@ from flask import Flask
 # ============================================================
 # AYARLAR
 # ============================================================
-8740764565:AAFwW-VRxTQQ_K0XFHtlwFteYGbefV0sjJM"
-TELEGRAM_BOT_TOKEN = "
+
+TELEGRAM_BOT_TOKEN = "8740764565:AAFwW-VRxTQQ_K0XFHtlwFteYGbefV0sjJM"
 TELEGRAM_CHAT_ID = "937967050"
 
 MIN_VOLUME_TRY = 100000

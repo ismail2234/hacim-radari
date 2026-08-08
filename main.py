@@ -19,7 +19,7 @@ from flask import Flask
 # AYARLAR
 # ============================================================
 
-TELEGRAM_BOT_TOKEN = "8740764565:AAFwW-VRxTQQ_K0XFHtlwFteYGbefV0sjJM"
+TELEGRAM_BOT_TOKEN = "8740764565:AAEg2qstGT7nzILN00OKTNgammNPuZ-OZFM"
 TELEGRAM_CHAT_ID = "937967050"
 
 # 24 saatlik minimum TRY hacmi

@@ -13,8 +13,8 @@ from flask import Flask
 # BALİNA RADARI V3.1
 # ============================================================
 
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8740764565:AAEg2qstGT7nzILN00OKTNgammNPuZ-OZFM")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "937967050")
 
 MIN_VOLUME_TRY = 100000
 MIN_VOLUME_USDT = 500000

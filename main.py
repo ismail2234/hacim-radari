@@ -522,14 +522,15 @@ def scan_loop():
 
 
 # ============================================================
-# ANA ÇALIŞTIRMA NOKTASI
+# OTOMATİK BAŞLATICI (GUNICORN / RAILWAY UYUMLU)
 # ============================================================
 
-if __name__ == "__main__":
-    # Flask sunucusunu arka planda başlat (Railway Port Durumu İçin)
-    flask_thread = Thread(target=run_flask, daemon=True)
-    flask_thread.start()
+# Railway / Gunicorn projeyi import ettiği an tarama motorunu arka planda başlatır
+scanner_thread = Thread(target=scan_loop, daemon=True, name="balina-scanner")
+scanner_thread.start()
 
-    # Ana tarama döngüsünü başlat
-    scan_loop()
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", "8080"))
+    app.run(host="0.0.0.0", port=port, use_reloader=False)
+
 

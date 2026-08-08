@@ -1059,30 +1059,30 @@ def scan_loop():
 
 
 # ============================================================
-# BASLAT
+# BAŞLAT
 # ============================================================
 
-if __name__ == "__main__":
+def start_scanner():
+    logger.info("🐋 Balina Radarı V3.1 scanner başlatılıyor.")
 
-    if not TELEGRAM_BOT_TOKEN:
-        raise RuntimeError(
-            "TELEGRAM_BOT_TOKEN Railway Variables "
-            "icinde bulunamadi."
+    try:
+        send_telegram(
+            "🐋 BALİNA RADARI V3.1 AKTİF\n\n"
+            "✅ Scanner çalışmaya başladı.\n"
+            "🔎 TRY + USDT taraması aktif.\n"
+            "⏱️ Tarama aralığı: 5 dakika"
         )
-
-    if not TELEGRAM_CHAT_ID:
-        raise RuntimeError(
-            "TELEGRAM_CHAT_ID Railway Variables "
-            "icinde bulunamadi."
+    except Exception as error:
+        logger.error(
+            "Başlangıç Telegram mesajı hatası: %s",
+            error
         )
-
-    logger.info(
-        "Balina Radari V3.1 baslatiliyor."
-    )
-
-    Thread(
-        target=run_flask,
-        daemon=True
-    ).start()
 
     scan_loop()
+
+
+Thread(
+    target=start_scanner,
+    daemon=True,
+    name="balina-scanner"
+).start()

@@ -20,12 +20,12 @@ from flask import Flask
 
 TELEGRAM_BOT_TOKEN = os.environ.get(
     "TELEGRAM_BOT_TOKEN",
-    ""
+    "8740764565:AAFwW-VRxTQQ_K0XFHtlwFteYGbefV0sjJM"
 )
 
 TELEGRAM_CHAT_ID = os.environ.get(
     "TELEGRAM_CHAT_ID",
-    ""
+    "937967050"
 )
 
 # 24 saatlik minimum TRY hacmi

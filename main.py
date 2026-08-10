@@ -992,4 +992,339 @@ def extract_market(
     # SUPPORT / RESISTANCE
     # --------------------------------------------------------
 
-    loo
+    lookback = 50
+
+    recent_highs = highs15[
+        -lookback - 2:
+        -2
+    ]
+
+    recent_lows = lows15[
+        -lookback - 2:
+        -2
+]
+
+    resistance = max(
+        recent_highs
+    )
+support = min(
+        recent_lows
+    )
+
+    resistance_distance = (
+        (resistance - price)
+        / price
+        * 100
+    )
+
+    support_distance = (
+        (price - support)
+        / price
+        * 100
+    )return Market(
+        price=price,
+
+        m1=m1,
+        m5=m5,
+        m15=m15,
+        m30=m30,volume_ratio=volume_ratio,
+        futures_volume_ratio=futures_volume_ratio,
+
+        taker_buy=taker_buy,
+        taker_delta=taker_delta,
+
+        rsi=rsi_value,
+
+        ema20=ema20,
+        ema50=ema50,
+        ema200=ema200,
+
+        macd_hist=macd_hist,
+        resistance=resistance,
+        support=support,
+
+        resistance_distance=resistance_distance,
+        support_distance=support_distance,
+    )
+# ============================================================
+# OI ANALYSIS
+# ============================================================
+
+@dataclass
+class Derivatives:
+
+    oi_change: float
+    oi_acceleration: float
+
+    funding: float
+
+    available: bool
+    def derivative_data(
+    symbol: str,
+) -> Derivatives:
+
+    current = open_interest(
+        symbol
+    )
+
+    reference = DBS.oi_reference(
+        symbol
+    )
+
+    previous = DBS.previous_oi(
+        symbol
+    )
+    if (
+        reference is not None
+        and current is not None
+    ):
+        oi_change = pct(
+            reference,
+            current,
+        )
+    else:
+        oi_change = 0.0
+
+    if (
+        previous is not None
+        and current is not None
+    ):
+        recent_change = pct(
+            previous,
+            current,
+        )recent_change = pct(
+            previous,
+            current,
+        )
+    else:
+        recent_change = 0.0
+
+    # Son ölçüm ile mevcut hareket arasındaki hız farkı.
+    oi_acceleration = (
+        recent_change
+        - oi_change
+    )
+
+    fund = funding(
+        symbol
+    )DBS.put_oi(
+        symbol,
+        current,
+    )
+
+    return Derivatives(
+        oi_change=oi_change,
+        oi_acceleration=oi_acceleration,
+        funding=fund or 0.0,
+        available=(
+            current is not None
+        ),
+    )
+
+# ============================================================
+# LATE MOVE FILTER
+# ============================================================
+
+def too_late(
+    m: Market,
+) -> bool:
+
+    if m.m5 >= CFG.max_early_5m:
+        return True
+
+    if m.m15 >= CFG.max_early_15m:
+        return True
+        if m.m30 >= CFG.max_early_30m:
+        return True
+
+    return False
+
+# ============================================================
+# LONG SCORE
+# ============================================================
+
+def score_long(
+    m: Market,
+    d: Derivatives,
+) -> Tuple[int, List[str], str]:
+
+    score = 0.0
+    evidence = []
+    # --------------------------------------------------------
+    # EARLY MOMENTUM
+    # --------------------------------------------------------
+
+    if 0.15 <= m.m1 <= 1.2:
+        score += 5
+        evidence.append(
+            "⚡ 1m kontrollümomentum"
+        )
+
+    if 0.2 <= m.m5 <= 2.5:
+        score += 8
+        evidence.append(
+            "🎯 5m erken momentum"
+        )
+
+    elif 2.5 < m.m5 <= 4.5:
+        score += 4
+        evidence.append(
+            "📈 5m momentum güçleniyor"
+        )
+        if 0 < m.m15 <= 3.5:
+        score += 6
+        evidence.append(
+            "📈 15m erken hareket"
+        )
+
+    # --------------------------------------------------------
+    # VOLUME
+    # --------------------------------------------------------
+
+    if m.volume_ratio >= 4:
+        score += 15
+        evidence.append(
+            f"🐋 Spot hacmi {m.volume_ratio:.1f}x"
+        )
+
+    elif m.volume_ratio >= 3:
+        score += 12
+        evidence.append(
+            f"🔥 Spot hacmi {m.volume_ratio:.1f}x"
+        )
+
+    elif m.volume_ratio >= 2:
+        score += 8evidence.append(
+            f"📊 Spot hacmi {m.volume_ratio:.1f}x"
+        )
+
+    if m.futures_volume_ratio >= 3:
+        score += 7
+        evidence.append(
+            f"⚡ Futures hacmi {m.futures_volume_ratio:.1f}x"
+        )
+
+    elif m.futures_volume_ratio >= 2:
+        score += 5
+        evidence.append(
+            f"⚡ Futures hacmi {m.futures_volume_ratio:.1f}x"
+        )
+        # --------------------------------------------------------
+    # TAKER FLOW
+    # --------------------------------------------------------
+
+    if m.taker_buy >= 68:
+        score += 15
+        evidence.append(
+            f"🐋 Çok güçlü alıcı akışı %{m.taker_buy:.1f}"
+        )elif m.taker_buy >= 58:
+        score += 7
+        evidence.append(
+            f"🟢 Pozitif alıcı akışı %{m.taker_buy:.1f}"
+        )
+
+    if m.taker_delta >= 3:
+        score += 5
+        evidence.append(
+            "🚀 Taker buy ivmesi artıyor"
+        )
+
+ # --------------------------------------------------------
+    # OI
+    # --------------------------------------------------------
+
+    if d.available:
+
+        if d.oi_change >= 8:
+            score += 12
+            evidence.append(
+                f"🐋 OI güçlü artıyor +%{d.oi_change:.1f}"
+            )
+
+        elif d.oi_change >= 5:
+            score += 9
+            evidence.append(
+                f"📈 OI artıyor +%{d.oi_change:.1f}"
+            )elif d.oi_change >= 3:
+            score += 6
+            evidence.append(
+                f"📊 OI yükseliyor +%{d.oi_change:.1f}"
+            )
+
+        if d.oi_acceleration > 1:
+            score += 5
+            evidence.append(
+                "🚀 OI ivmesi hızlanıyor"
+            )
+
+    # --------------------------------------------------------
+    # PRICE + OI STRUCTURE
+    # --------------------------------------------------------
+    if (
+        m.m15 >= 0
+        and d.oi_change >= 3
+    ):
+        score += 6
+        evidence.append(
+            "🔗 Fiyat + OI uyumlu"
+        )
+        # --------------------------------------------------------
+    # TREND
+    # --------------------------------------------------------
+if m.price > m.ema20:
+        score += 3
+        evidence.append(
+            "📈 Fiyat EMA20 üzerinde"
+        )
+    if m.ema20 > m.ema50:
+        score += 4
+        evidence.append(
+            "📈 Kısa vadeli trend yukarı"
+        )
+
+    if m.price > m.ema200:
+        score += 3
+        evidence.append(
+            "🌟 EMA200 üzerinde"
+        )
+        # --------------------------------------------------------
+    # MACD
+    # --------------------------------------------------------
+
+    if m.macd_hist > 0:
+        score += 6
+        evidence.append(
+            "📊 MACD pozitif"
+        )
+
+    #--------------------------------------------------------
+    # RSI
+    # --------------------------------------------------------
+
+    if 48 <= m.rsi <= 67:
+        score += 7
+        evidence.append(
+            f"📊 RSI sağlıklı ivme {m.rsi:.1f}"
+        )
+
+    elif 67 < m.rsi <= 73:
+        score += 2
+
+    elif m.rsi > 78:
+        score -= 10
+        evidence.append(
+            "⏰ RSI aşırı yükseldi"
+        )
+        # --------------------------------------------------------
+    # STRUCTURE
+    # --------------------------------------------------------
+
+    if (
+        m.price > m.resistance
+        and m.volume_ratio >= 2
+    ):
+        score += 15
+        evidence.append(
+            "💥 Direnç hacimle kırıldı"
+        )
+        

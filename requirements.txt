@@ -1,6 +1,6 @@
 flask
 requests
 urllib3
+gunicorn
 
- 
 

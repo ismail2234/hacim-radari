@@ -568,3 +568,19 @@ def analyze(symbol: str) -> Dict[str, Any]:
             total_score = CFG.overextended_score_cap
 
         sign
+scanner_thread = Thread(
+    target=scan_loop,
+    daemon=True,
+    name="balina-scanner"
+)
+scanner_thread.start()
+
+
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", "8080"))
+    app.run(
+        host="0.0.0.0",
+        port=port,
+        use_reloader=False
+                             )
+    

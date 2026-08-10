@@ -1328,3 +1328,163 @@ if m.price > m.ema20:
             "💥 Direnç hacimle kırıldı"
         )
         
+signal_type = "CONFIRMED LONG"
+
+    elif (
+        0 <= m.resistance_distance
+        <= CFG.structure_distance
+        and m.volume_ratio >= 2
+        and m.taker_buy >= 58
+    ):
+        score += 9
+        evidence.append(
+            f"🎯 Dirence yakın ({m.resistance_distance:.2f}%)"
+        )
+
+        signal_type = "EARLY LONG"
+
+    else:
+        signal_type = "EARLY LONG"# --------------------------------------------------------
+    # FUNDING
+    # --------------------------------------------------------
+
+    if d.funding < -0.0005:
+        score += 5
+        evidence.append(
+            "⚡ Negatif funding / squeeze desteği"
+        )
+
+    elif d.funding > 0.001:
+        score -= 4
+        evidence.append(
+            "⚠️ Funding fazla pozitif"return (
+        clamp(score),
+        evidence,
+        signal_type,
+    )
+
+# ============================================================
+# SHORT SCORE
+# ============================================================
+
+def score_short(
+    m: Market,
+    d: Derivatives,
+) -> Tuple[int, List[str], str]:
+
+    score = 0.0
+    evidence = []
+
+    # --------------------------------------------------------
+    # MOMENTUM
+    # --------------------------------------------------------
+    if -1.2 <= m.m1 <= -0.15:
+        score += 5
+        evidence.append(
+            "⚡ 1m aşağı momentum"
+        )
+
+    if -2.5 <= m.m5 <= -0.2:
+        score += 8
+        evidence.append(
+            "🎯 5m erken düşüş momentumu"
+        )
+
+    elif -4.5 <= m.m5 < -2.5:
+        score += 4
+        evidence.append(
+            "📉 5m düşüş hızlanıyor"
+        )
+
+    if -3.5 <= m.m15 < 0:
+        score += 6
+        evidence.append(
+            "📉 15m erken düşüş"
+            )
+    # --------------------------------------------------------
+    # VOLUME
+    # --------------------------------------------------------
+
+    if m.volume_ratio >= 4:
+        score += 15
+        evidence.append(
+            f"🔻 Spot satış hacmi {m.volume_ratio:.1f}x"
+        )
+
+    elif m.volume_ratio >= 3:
+        score += 12
+        evidence.append(
+            f"🔻 Spot hacmi {m.volume_ratio:.1f}x"
+        )
+
+    elif m.volume_ratio >= 2:
+        score += 8
+        evidence.append(
+            f"📉 Spot hacmi {m.volume_ratio:.1f}x"
+)if m.futures_volume_ratio >= 3:
+        score += 7
+        evidence.append(
+            f"⚡ Futures hacmi {m.futures_volume_ratio:.1f}x"
+        )
+
+    elif m.futures_volume_ratio >= 2:
+        score += 5
+        evidence.append(
+            f"⚡ Futures hacmi {m.futures_volume_ratio:.1f}x"
+        )
+
+    # --------------------------------------------------------
+    # TAKER SELL
+    # --------------------------------------------------------
+
+    seller = 100 - m.taker_buyif m.taker_buy <= 32:
+        score += 15
+        evidence.append(
+            f"🐋 Çok güçlü satıcı akışı %{seller:.1f}"
+        )
+
+    elif m.taker_buy <= 37:
+        score += 12
+        evidence.append(
+            f"🔴 Güçlü satıcı akışı %{seller:.1f}"
+        )
+
+    elif m.taker_buy <= 42:
+        score += 7
+        evidence.append(
+            f"🔴 Pozitif satış baskısı %{seller:.1f}"
+    
+if m.taker_delta <= -3:
+        score += 5
+        evidence.append(
+            "🚨 Satıcı akışı hızlanıyor"
+        )
+
+    #--------------------------------------------------------
+    # OI
+    # --------------------------------------------------------
+
+    if d.available:if d.oi_change >= 8:
+            score += 12
+            evidence.append(
+                f"🐋 OI güçlü artıyor +%{d.oi_change:.1f}"
+            )
+
+        elif d.oi_change >= 5:
+            score += 9
+            evidence.append(
+                f"📉 OI artıyor +%{d.oi_change:.1f}"
+            )
+
+        elif d.oi_change >= 3:
+            score += 6
+            evidence.append(
+                f"📊 OI yükseliyor +%{d.oi_change:.1f}"
+)
+        if d.oi_acceleration > 1:
+            score += 5
+            evidence.append(
+                "🚀 OI ivmesi hızlanıyor"
+            )
+
+    # ------------------------------

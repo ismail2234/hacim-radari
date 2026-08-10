@@ -1045,3 +1045,4 @@ def extract_base_metrics(
     # --------------------------------------------------------
     # VOLUME ACCELERATION
     # -------------------------
+Thread(target=loop, daemon=True, name="balina-v5").start()

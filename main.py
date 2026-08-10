@@ -28,7 +28,8 @@ class Config:
     max_signals: int = field(default_factory=lambda: int(os.getenv("MAX_SIGNALS_PER_SCAN", "5")))
     cooldown: int = field(default_factory=lambda: int(os.getenv("SIGNAL_COOLDOWN", "7200")))
     timeout: int = field(default_factory=lambda: int(os.getenv("REQUEST_TIMEOUT", "8")))
-    db: str = field(default_factory=lambda: os.getenv("STATE_DB_PATH", "balina_v6.db"))
+    db: str = field(default_factory=lambda: os.getenv("STATE_DB_PATH", "/tmp/balina_v6.db"))
+
     oi_staleness_factor: int = field(default_factory=lambda: int(os.getenv("OI_STALENESS_FACTOR", "3")))
 
     derivative_max_bonus: int = field(default_factory=lambda: int(os.getenv("DERIVATIVE_MAX_BONUS", "25")))

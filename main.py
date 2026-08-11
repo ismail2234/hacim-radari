@@ -228,3 +228,314 @@ def candidates(st,ft):
             continue
 
     return out
+# 3/5
+def analyze(s):
+    try:
+        sp=klines(SPOT,s,"1m",120)
+        fu=klines(FUT,s,"1m",60)
+        sp5=klines(SPOT,s,"5m",30)
+
+        if len(sp)<70 or len(fu)<40 or len(sp5)<20:
+            return {"status":"PASS"}
+
+        live=sp[-1]
+        price=float(live[4])
+
+        c=[float(x[4]) for x in sp[:-1]]
+        h=[float(x[2]) for x in sp[:-1]]
+        l=[float(x[3]) for x in sp[:-1]]
+        o=[float(x[1]) for x in sp[:-1]]
+
+        c5=[float(x[4]) for x in sp5[:-1]]
+
+        m1=pct(c[-2],price)
+        m5=pct(c5[-2],price)
+        m15=pct(c5[-4],price)
+
+        if m1>1.5 or m5>3 or m15>5:
+            return {"status":"PASS"}
+
+        lo=min(l[-60:])
+        hi=max(h[-60:])
+        loc=(price-lo)/(hi-lo)*100 if hi>lo else 50
+
+        dip=20 if loc<=25 else 14 if loc<=40 else 0
+
+        base_range=(max(h[-12:])-min(l[-12:]))/price*100
+        base=base_range<=1.6
+
+        if base:
+            dip+=5
+
+        sv=[float(x[7]) for x in sp[:-1]]
+        fv=[float(x[7]) for x in fu[:-1]]
+        tr=[float(x[8]) for x in sp[:-1]]
+
+        avs=avg(sv[-36:])
+        avf=avg(fv[-36:])
+        avt=avg(tr[-36:])
+
+        if min(avs,avf,avt)<=0:
+            return {"status":"PASS"}
+
+        sr=avg(sv[-3:])/avs
+        fr=avg(fv[-3:])/avf
+        trr=avg(tr[-3:])/avt
+
+        prevv=avg(sv[-6:-3])
+        imp=avg(sv[-3:])/prevv if prevv>0 else 1
+
+        buy=sum(float(x[11]) for x in sp[-3:])
+        vol=sum(float(x[7]) for x in sp[-3:])
+        bp=buy/vol*100 if vol>0 else 50
+
+        spot_lead=sr>=1.5 and sr>=fr*1.15
+
+        money=0
+
+        if sr>=2.8:money+=12
+        elif sr>=2.0:money+=9
+        elif sr>=1.5:money+=6
+        elif sr>=1.2:money+=3
+
+        if fr>=2.2:money+=6
+        elif fr>=1.5:money+=4
+        elif fr>=1.2:money+=2
+
+        if trr>=2.0:money+=5
+        elif trr>=1.5:money+=3
+
+        if bp>=72 and sr>=1.2:money+=5
+        elif bp>=62 and sr>=1.2:money+=3
+
+        if spot_lead:
+            money+=4
+
+        e9=ema(c,9)
+        e21=ema(c,21)
+        e50=ema(c,50)
+
+        e9p=ema(c[:-3],9)
+        e21p=ema(c[:-3],21)
+
+        ema_up=e9>e21
+        ema_turn=e9>e9p and e9p<=e21p
+
+        rv=rsi(c)
+        rvp=rsi(c[:-3])
+
+        mm,ms,mh=macd(c)
+        pm,ps,ph=macd(c[:-3])
+
+        ad,di,mdi=adx(h,l,c)
+
+        momentum=0
+
+        if ema_up:
+            momentum+=4
+
+        if ema_turn or e9>e9p:
+            momentum+=3
+
+        if 38<=rv<=58 and rv>rvp:
+            momentum+=5
+        elif 45<rv<=64 and rv>rvp:
+            momentum+=3
+
+        if mh>ph:
+            momentum+=4
+
+        if ad>=18 and di>mdi:
+            momentum+=4
+
+        if price>=e50:
+            momentum+=2
+
+        bl,bm,bu=bb(c)
+        width=(bu-bl)/bm*100 if bm else 0
+
+        old_l,old_m,old_u=bb(c[:-5])
+        pwidth=(old_u-old_l)/old_m*100 if old_m else width
+
+        squeeze=width<=1.8 or width<pwidth*.8
+        expanding=width>pwidth*1.05 if pwidth else False
+
+        recent_high=max(h[-20:])
+        dist=max(0,(recent_high-price)/price*100)
+
+        breakout=0
+
+        if dist<=.15:breakout+=9
+        elif dist<=.35:breakout+=7
+        elif dist<=.7:breakout+=4
+
+        if squeeze:
+            breakout+=4
+
+        if expanding and imp>=1.3:
+            breakout+=3
+
+        higher_low=l[-1]>l[-3] and l[-3]>=l[-6]
+
+        rejection=(min(o[-1],c[-1])-l[-1])>abs(c[-1]-o[-1])*.8
+
+        if higher_low:
+            breakout+=3
+
+        if rejection:
+            breakout+=2
+
+        risk=0
+
+        falling=m5<-.8 and m15<-1.2 and not higher_low and not rejection
+
+        if falling:
+            risk-=15
+
+        if bp<55 and sr>=2:
+            risk-=10
+
+        if sr<1.0 and bp>=75:
+            risk-=6
+
+        if rv>72:
+            risk-=8
+
+        if m5>2:
+            risk-=8
+
+        score=clamp(dip+money+momentum+breakout+risk)
+
+        prev=DBS.prev(s)
+        progress=0
+
+        if prev and score>=float(prev[0])+5:
+            progress=4
+            score=clamp(score+4)
+
+        oi_change=None
+        reasons_oi=""
+
+        if score>=70:
+            now=oi(s)
+            old=DBS.getoi(s)
+
+            if old is not None and now is not None:
+                oi_change=pct(old,now)
+
+                if oi_change>=.7:
+                    score=clamp(score+3)
+                    reasons_oi="OI artıyor"
+
+                elif oi_change<=-1.5:
+                    score=clamp(score-3)
+                    reasons_oi="OI düşüyor"
+
+            DBS.putoi(s,now)
+
+        if score<68:
+            return {"status":"PASS","score":score}
+
+        very=(
+            score>=92 and
+            dip>=19 and
+            money>=23 and
+            momentum>=13 and
+            breakout>=10 and
+            sr>=1.8 and
+            bp>=60 and
+            not falling
+        )
+
+        buy=(
+            score>=84 and
+            dip>=14 and
+            money>=17 and
+            momentum>=9 and
+            breakout>=7 and
+            sr>=1.5 and
+            bp>=60 and
+            not falling
+        )
+
+        watch=(
+            score>=74 and
+            dip>=14 and
+            money>=11 and
+            breakout>=5 and
+            (sr>=1.2 or bp>=65) and
+            not falling
+        )
+
+        level="VERY" if very else "BUY" if buy else "WATCH" if watch else "PASS"
+
+        reasons=[]
+
+        if reasons_oi:
+            reasons.append(reasons_oi)
+
+        if dip>=19:
+            reasons.append("Dip")
+
+        elif dip>=14:
+            reasons.append("Dip bölgesi")
+
+        if sr>=1.5:
+            reasons.append(f"Spot {sr:.2f}x")
+
+        if spot_lead:
+            reasons.append("Spot öncü")
+
+        if bp>=65:
+            reasons.append(f"Alıcı %{bp:.0f}")
+
+        if ema_up:
+            reasons.append("EMA9>21")
+
+        if rv>rvp and 35<rv<65:
+            reasons.append("RSI dönüyor")
+
+        if mh>ph:
+            reasons.append("MACD güçleniyor")
+
+        if squeeze:
+            reasons.append("BB sıkışması")
+
+        if dist<=.35:
+            reasons.append(f"Kırılıma %{dist:.2f}")
+
+        if higher_low:
+            reasons.append("Higher-Low")
+
+        if imp>=1.4:
+            reasons.append(f"Hacim ivmesi {imp:.2f}x")
+
+        if progress:
+            reasons.append("Güçleniyor")
+
+        return {
+            "status":level,
+            "symbol":s,
+            "score":score,
+            "price":price,
+            "loc":loc,
+            "bp":bp,
+            "sr":sr,
+            "fr":fr,
+            "trr":trr,
+            "rv":rv,
+            "ema_up":ema_up,
+            "macd_up":mh>ph,
+            "squeeze":squeeze,
+            "dist":dist,
+            "imp":imp,
+            "higher_low":higher_low,
+            "spot_lead":spot_lead,
+            "adx":ad,
+            "oi":oi_change,
+            "reasons":reasons
+        }
+
+    except Exception as e:
+        log.debug("%s: %s",s,e)
+        return {"status":"error"}

@@ -1080,3 +1080,319 @@ def analyze(symbol):
         )
 
         return {"status": "error"}
+def message(result):
+
+    if result["oi"] is None:
+        oi_text = "veri bekleniyor"
+    else:
+        oi_text = f"%{result['oi']:.2f}"
+
+    if result["status"] == "ROCKET":
+        header = "🐋 BALİNA RADARI V17 — 🚀 ÇOK ÇOK GÜÇLÜ AL"
+        footer = (
+            "🚀 Hazırlık → Güçlü → Çok Güçlü aşamasına ulaştı."
+        )
+
+    elif result["status"] == "STRONG":
+        header = "🐋 BALİNA RADARI V17 — 🟢 GÜÇLÜ AL"
+        footer = (
+            "🟢 Aynı coin hazırlık aşamasından güçlü teyit aşamasına geçti."
+        )
+
+    else:
+        header = "🐋 BALİNA RADARI V17 — 🔵 HAZIRLIK AL"
+        footer = (
+            "👁️ Dip/birikim yapısı oluşuyor. Güçlü teyit henüz tamamlanmadı."
+        )
+
+    def check(value):
+        return "✅" if value else "❌"
+
+    reasons = "\n".join(
+        "• " + item
+        for item in result["reasons"]
+    )
+
+    return (
+        f"{header}\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"🪙 #{result['symbol']}\n"
+        f"💰 Fiyat: {result['price']:.8g}\n"
+        f"🏆 GÜÇ SKORU: {result['score']}/100\n\n"
+
+        "📍 DİP KONUMU\n"
+        f"• Son 30m konumu: %{result['location']:.1f}\n"
+        f"• Dip tabanı: {check(result['base_forming'])}\n\n"
+
+        "🐋 PARA AKIŞI\n"
+        f"• Spot hacim: {result['sr']:.2f}x\n"
+        f"• Futures hacim: {result['fr']:.2f}x\n"
+        f"• İşlem sayısı: {result['trr']:.2f}x\n"
+        f"• Alıcı baskısı: %{result['bp']:.1f}\n"
+        f"• Spot öncü: {check(result['spot_leads'])}\n\n"
+
+        "📐 KIRILIM HAZIRLIĞI\n"
+        f"• MA sıkışması: "
+        f"{check(result['ma_squeeze'])} "
+        f"(%{result['ma_diff_pct']:.2f})\n"
+        f"• Sessiz birikim: "
+        f"{check(result['silent_accum'])}\n"
+        f"• Volatilite daralması: "
+        f"{check(result['volatility_compression'])}\n"
+        f"• Kırılıma mesafe: "
+        f"%{result['breakout_distance']:.2f}\n"
+        f"• Hacim ivmesi: "
+        f"{result['vol_acc']:.2f}x\n\n"
+
+        "📈 PRICE ACTION\n"
+        f"• Higher-Low: {check(result['higher_low'])}\n"
+        f"• Tepe kırılımı: {check(result['break_high'])}\n"
+        f"• Satış reddi: {check(result['wick_rejection'])}\n\n"
+
+        "⚡ MOMENTUM\n"
+        f"• Canlı 1m: {result['lc']:+.2f}%\n"
+        f"• 5m: {result['m5']:+.2f}%\n"
+        f"• 15m: {result['m15']:+.2f}%\n"
+        f"• OI: {oi_text}\n\n"
+
+        "🔎 NEDEN SİNYAL?\n"
+        f"{reasons}\n\n"
+
+        f"{footer}\n"
+        "⚠️ Teknik filtredir; risk yönetimi sana aittir."
+    )
+
+
+def scan():
+
+    start = time.time()
+
+    spot = tickers(SPOT)
+    futures = tickers(FUT)
+
+    if not spot or not futures:
+        return True
+
+    symbols = candidates(
+        spot,
+        futures,
+    )
+
+    signals = []
+    stats = {}
+
+    with ThreadPoolExecutor(
+        max_workers=WORKERS
+    ) as executor:
+
+        jobs = [
+            executor.submit(
+                analyze,
+                symbol,
+            )
+            for symbol in symbols
+        ]
+
+        for job in as_completed(jobs):
+
+            result = job.result()
+
+            status = result.get(
+                "status",
+                "error",
+            )
+
+            stats[status] = (
+                stats.get(status, 0) + 1
+            )
+
+            if status in (
+                "PREP",
+                "STRONG",
+                "ROCKET",
+            ):
+                signals.append(result)
+
+    signals.sort(
+        key=lambda x: (
+            x.get("stage", 0),
+            x.get("score", 0),
+        ),
+        reverse=True,
+    )
+
+    sent = 0
+
+    for result in signals:
+
+        if sent >= MAX_SIGNALS:
+            break
+
+        symbol = result["symbol"]
+        stage = result["stage"]
+
+        if not DBS.can_send(
+            symbol,
+            stage,
+        ):
+            continue
+
+        if telegram(
+            message(result)
+        ):
+
+            DBS.sent(
+                symbol,
+                result["score"],
+                stage,
+            )
+
+            sent += 1
+
+        time.sleep(0.5)
+
+    elapsed = time.time() - start
+
+    errors = stats.get(
+        "error",
+        0,
+    )
+
+    total = max(
+        1,
+        len(symbols),
+    )
+
+    log.info(
+        "🐋 V17 | Aday:%d | "
+        "HAZIRLIK:%d | GÜÇLÜ:%d | "
+        "ÇOK GÜÇLÜ:%d | Geç:%d | "
+        "Hata:%d | Gönder:%d | %.1fs",
+
+        len(symbols),
+        stats.get("PREP", 0),
+        stats.get("STRONG", 0),
+        stats.get("ROCKET", 0),
+        stats.get("late", 0),
+        errors,
+        sent,
+        elapsed,
+    )
+
+    return (
+        errors / total > 0.30
+        or elapsed > SCAN_INTERVAL * 1.25
+    )
+
+
+app = Flask(__name__)
+
+
+@app.route("/")
+def home():
+
+    return (
+        "🐋 Balina Radarı V17 "
+        "Stage Tracker Aktif!"
+    )
+
+
+@app.route("/health")
+def health():
+
+    return {
+        "status": "ok",
+        "bot": "Balina Radarı V17",
+        "prep_threshold": PREP_THRESHOLD,
+        "strong_threshold": STRONG_THRESHOLD,
+        "rocket_threshold": ROCKET_THRESHOLD,
+    }
+
+
+def loop():
+
+    log.info(
+        "🐋 BALİNA RADARI V17 başlatılıyor..."
+    )
+
+    if TOKEN and CHAT:
+
+        telegram(
+            "🐋 BALİNA RADARI V17 AKTİF\n\n"
+            "🔵 HAZIRLIK AL\n"
+            "🟢 GÜÇLÜ AL\n"
+            "🚀 ÇOK ÇOK GÜÇLÜ AL\n\n"
+            "🟦 Dip\n"
+            "🧱 Dip tabanı\n"
+            "🤫 Sessiz birikim\n"
+            "📐 MA sıkışması\n"
+            "🤏 Volatilite daralması\n"
+            "🐋 Spot para akışı\n"
+            "🎯 Kırılım mesafesi\n"
+            "📈 Price Action\n"
+            "🔁 Aşama yükseltme takibi"
+        )
+
+    while True:
+
+        started = time.time()
+
+        try:
+            backoff = scan()
+
+        except Exception:
+
+            log.exception(
+                "Tarama döngüsü hatası"
+            )
+
+            backoff = True
+
+        elapsed = (
+            time.time()
+            - started
+        )
+
+        if backoff:
+
+            wait = max(
+                180,
+                SCAN_INTERVAL * 3,
+            )
+
+            log.warning(
+                "🛑 Koruma beklemesi: %d saniye",
+                wait,
+            )
+
+            time.sleep(wait)
+
+        else:
+
+            time.sleep(
+                max(
+                    1,
+                    SCAN_INTERVAL - elapsed,
+                )
+            )
+
+
+Thread(
+    target=loop,
+    daemon=True,
+    name="balina-v17",
+).start()
+
+
+if __name__ == "__main__":
+
+    app.run(
+        host="0.0.0.0",
+        port=int(
+            os.getenv(
+                "PORT",
+                "8080",
+            )
+        ),
+        use_reloader=False,
+    )

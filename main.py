@@ -583,3 +583,500 @@ def analyze(symbol):
             or break_high
             or wick_rejection
         )
+        closed_spot = spot[:-1]
+        closed_futures = futures[:-1]
+
+        spot_volume = [
+            float(x[7])
+            for x in spot
+        ]
+
+        futures_volume = [
+            float(x[7])
+            for x in futures
+        ]
+
+        trades = [
+            float(x[8])
+            for x in spot
+        ]
+
+        average_spot = avg([
+            float(x[7])
+            for x in closed_spot[-18:]
+        ])
+
+        average_futures = avg([
+            float(x[7])
+            for x in closed_futures[-18:]
+        ])
+
+        average_trades = avg([
+            float(x[8])
+            for x in closed_spot[-18:]
+        ])
+
+        if min(
+            average_spot,
+            average_futures,
+            average_trades,
+        ) <= 0:
+            return {"status": "insufficient"}
+
+        spot_ratio = (
+            avg(spot_volume[-3:])
+            / average_spot
+        )
+
+        futures_ratio = (
+            avg(futures_volume[-3:])
+            / average_futures
+        )
+
+        trade_ratio = (
+            avg(trades[-3:])
+            / average_trades
+        )
+
+        previous_volume = avg(
+            spot_volume[-6:-3]
+        )
+
+        volume_acceleration = (
+            avg(spot_volume[-3:])
+            / previous_volume
+            if previous_volume > 0
+            else 1
+        )
+
+        silent_accumulation = (
+            -0.35 <= live_change <= 0.45
+            and (
+                spot_ratio >= 2.2
+                or futures_ratio >= 2.2
+            )
+        )
+
+        buy3 = sum(
+            float(x[10])
+            for x in spot[-3:]
+        )
+
+        volume3 = sum(
+            float(x[7])
+            for x in spot[-3:]
+        )
+
+        buy5 = sum(
+            float(x[10])
+            for x in spot[-5:]
+        )
+
+        volume5 = sum(
+            float(x[7])
+            for x in spot[-5:]
+        )
+
+        bp3 = (
+            buy3 / volume3 * 100
+            if volume3
+            else 50
+        )
+
+        bp5 = (
+            buy5 / volume5 * 100
+            if volume5
+            else 50
+        )
+
+        buy_pressure = (
+            bp3 * 0.65
+            + bp5 * 0.35
+        )
+
+        spot_leads = (
+            spot_ratio >= 2
+            and spot_ratio >= futures_ratio * 1.15
+        )
+
+        ranges = []
+
+        for candle in closed[-12:]:
+
+            low = float(candle[3])
+
+            if low <= 0:
+                continue
+
+            high = float(candle[2])
+
+            ranges.append(
+                (high - low)
+                / low
+                * 100
+            )
+
+        volatility_compression = False
+
+        if len(ranges) >= 8:
+
+            recent = avg(
+                ranges[-4:]
+            )
+
+            previous = avg(
+                ranges[-8:-4]
+            )
+
+            if previous > 0:
+                volatility_compression = (
+                    recent
+                    <= previous * 0.75
+                )
+
+        resistance = max(
+            highs[-8:]
+        )
+
+        breakout_distance = (
+            max(
+                0,
+                (resistance - price)
+                / price
+                * 100,
+            )
+            if resistance > 0
+            else 99
+        )
+
+        near_breakout = (
+            breakout_distance <= 0.60
+        )
+
+        falling = (
+            m5 < -0.8
+            and m15 < -1.2
+            and not reversal
+        )
+
+        distribution = (
+            buy_pressure < 58
+            and spot_ratio >= 3
+            and m5 < -0.3
+        )
+
+        score = 0
+        reasons = []
+
+        if very_low:
+            score += 20
+            reasons.append(
+                "🟦 Çok güçlü yerel dip bölgesi"
+            )
+
+        elif near_low:
+            score += 14
+            reasons.append(
+                "🟦 Yerel dip/birikim bölgesi"
+            )
+
+        if base_forming:
+            score += 8
+            reasons.append(
+                "🧱 Dip tabanı oluşuyor"
+            )
+
+        if ma_squeeze:
+            score += 12
+            reasons.append(
+                f"📐 MA sıkışması (%{ma_difference:.2f})"
+            )
+
+        if ma_turning_up:
+            score += 5
+            reasons.append(
+                "📈 Kısa MA yukarı dönüyor"
+            )
+
+        if silent_accumulation:
+            score += 12
+            reasons.append(
+                "🤫 Sessiz birikim tespit edildi"
+            )
+
+        if volatility_compression:
+            score += 8
+            reasons.append(
+                "🤏 Volatilite daralıyor"
+            )
+
+        if spot_ratio >= 3.5:
+            score += 12
+            reasons.append(
+                f"🐋 Spot akışı çok güçlü ({spot_ratio:.2f}x)"
+            )
+
+        elif spot_ratio >= 2:
+            score += 8
+            reasons.append(
+                f"📈 Spot akışı başladı ({spot_ratio:.2f}x)"
+            )
+
+        if spot_leads:
+            score += 5
+            reasons.append(
+                "🐋 Spot akışı futures'tan önce geliyor"
+            )
+
+        if buy_pressure >= 78:
+            score += 12
+            reasons.append(
+                f"🟢 Çok güçlü alıcı baskısı (%{buy_pressure:.1f})"
+            )
+
+        elif buy_pressure >= 68:
+            score += 8
+            reasons.append(
+                f"🟢 Güçlü alıcı baskısı (%{buy_pressure:.1f})"
+            )
+
+        elif buy_pressure >= 62:
+            score += 5
+            reasons.append(
+                f"🟢 Pozitif alıcı baskısı (%{buy_pressure:.1f})"
+            )
+
+        if trade_ratio >= 2:
+            score += 8
+            reasons.append(
+                f"🤖 İşlem sayısı güçlü ({trade_ratio:.2f}x)"
+            )
+
+        elif trade_ratio >= 1.5:
+            score += 4
+            reasons.append(
+                f"📊 İşlem sayısı artıyor ({trade_ratio:.2f}x)"
+            )
+
+        if futures_ratio >= 2.5:
+            score += 7
+            reasons.append(
+                f"⚡ Futures akışı güçlü ({futures_ratio:.2f}x)"
+            )
+
+        elif futures_ratio >= 1.5:
+            score += 4
+            reasons.append(
+                f"⚡ Futures destekliyor ({futures_ratio:.2f}x)"
+            )
+
+        if higher_low:
+            score += 8
+            reasons.append(
+                "📐 Higher-Low oluştu"
+            )
+
+        if wick_rejection:
+            score += 6
+            reasons.append(
+                "🛡️ Dipte satış reddedildi"
+            )
+
+        if break_high:
+            score += 9
+            reasons.append(
+                "💥 Önceki tepe kırıldı"
+            )
+
+        if near_breakout:
+            score += 7
+            reasons.append(
+                f"🎯 Kırılım çok yakın (%{breakout_distance:.2f})"
+            )
+
+        if volume_acceleration >= 1.8:
+            score += 6
+            reasons.append(
+                f"🚀 Hacim ivmesi güçlü ({volume_acceleration:.2f}x)"
+            )
+
+        elif volume_acceleration >= 1.2:
+            score += 3
+            reasons.append(
+                f"📈 Hacim ivmesi pozitif ({volume_acceleration:.2f}x)"
+            )
+
+        if falling:
+            score -= 18
+            reasons.append(
+                "⚠️ Düşüş trendi devam ediyor"
+            )
+
+        if distribution:
+            score -= 22
+            reasons.append(
+                "⚠️ Dağıtım riski yüksek"
+            )
+
+        score = clamp(score)
+
+        oi_change = None
+
+        if score >= PREP_THRESHOLD - 5:
+
+            current_oi = open_interest(symbol)
+            previous_oi = DBS.get_oi(symbol)
+
+            if (
+                previous_oi is not None
+                and current_oi is not None
+            ):
+
+                oi_change = pct(
+                    previous_oi,
+                    current_oi,
+                )
+
+                if oi_change >= 0.8:
+
+                    score = clamp(
+                        score + 4
+                    )
+
+                    reasons.append(
+                        f"📈 OI destekli (+%{oi_change:.2f})"
+                    )
+
+                elif oi_change <= -1.5:
+
+                    score = clamp(
+                        score - 4
+                    )
+
+                    reasons.append(
+                        f"⚠️ OI geriliyor (%{oi_change:.2f})"
+                    )
+
+            DBS.put_oi(
+                symbol,
+                current_oi,
+            )
+
+        accumulation = (
+            (very_low or near_low)
+            and (
+                silent_accumulation
+                or ma_squeeze
+                or spot_ratio >= 2
+            )
+            and buy_pressure >= 62
+            and not falling
+            and not distribution
+        )
+
+        turning = (
+            accumulation
+            and reversal
+        )
+
+        early = (
+            live_change <= 0.80
+            and m5 <= 1.40
+        )
+
+        preparation = (
+            score >= PREP_THRESHOLD
+            and accumulation
+            and early
+        )
+
+        strong = (
+            score >= STRONG_THRESHOLD
+            and accumulation
+            and turning
+            and early
+            and (
+                buy_pressure >= 68
+                or spot_ratio >= 3
+            )
+        )
+
+        rocket = (
+            score >= ROCKET_THRESHOLD
+            and accumulation
+            and turning
+            and early
+            and (
+                break_high
+                or near_breakout
+                or higher_low
+            )
+            and (
+                buy_pressure >= 72
+                or spot_ratio >= 3
+            )
+        )
+
+        if rocket:
+
+            status = "ROCKET"
+            stage = 3
+            signal_type = "🚀 ÇOK ÇOK GÜÇLÜ AL"
+
+        elif strong:
+
+            status = "STRONG"
+            stage = 2
+            signal_type = "🟢 GÜÇLÜ AL"
+
+        elif preparation:
+
+            status = "PREP"
+            stage = 1
+            signal_type = "🔵 HAZIRLIK AL"
+
+        else:
+
+            status = "PASS"
+            stage = 0
+            signal_type = "⚪ PASS"
+
+        return {
+            "status": status,
+            "stage": stage,
+            "type": signal_type,
+            "symbol": symbol,
+            "score": score,
+            "price": price,
+            "location": location,
+            "base_forming": base_forming,
+            "sr": spot_ratio,
+            "fr": futures_ratio,
+            "trr": trade_ratio,
+            "bp": buy_pressure,
+            "spot_leads": spot_leads,
+            "lc": live_change,
+            "m5": m5,
+            "m15": m15,
+            "ma_squeeze": ma_squeeze,
+            "ma_diff_pct": ma_difference,
+            "silent_accum": silent_accumulation,
+            "volatility_compression": volatility_compression,
+            "breakout_distance": breakout_distance,
+            "higher_low": higher_low,
+            "break_high": break_high,
+            "wick_rejection": wick_rejection,
+            "vol_acc": volume_acceleration,
+            "oi": oi_change,
+            "reasons": reasons,
+        }
+
+    except Exception as exc:
+
+        log.debug(
+            "%s analiz hatası: %s",
+            symbol,
+            exc,
+        )
+
+        return {"status": "error"}

@@ -212,3 +212,374 @@ def clamp(value):
             int(round(value)),
         ),
 )
+class DB:
+
+    def __init__(self, path):
+        self.path = path
+        self.lock = Lock()
+
+        with self.lock, sqlite3.connect(path) as db:
+
+            db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS state(
+                    symbol TEXT PRIMARY KEY,
+                    sent REAL,
+                    score REAL,
+                    stage INTEGER DEFAULT 0
+                )
+                """
+            )
+
+            db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS oi(
+                    symbol TEXT PRIMARY KEY,
+                    value REAL,
+                    ts REAL
+                )
+                """
+            )
+
+            columns = {
+                row[1]
+                for row in db.execute(
+                    "PRAGMA table_info(state)"
+                ).fetchall()
+            }
+
+            if "stage" not in columns:
+                db.execute(
+                    "ALTER TABLE state "
+                    "ADD COLUMN stage INTEGER DEFAULT 0"
+                )
+
+    def get_stage(self, symbol):
+
+        with self.lock, sqlite3.connect(self.path) as db:
+            row = db.execute(
+                "SELECT stage FROM state WHERE symbol=?",
+                (symbol,),
+            ).fetchone()
+
+        return int(row[0]) if row else 0
+
+    def can_send(self, symbol, stage):
+
+        with self.lock, sqlite3.connect(self.path) as db:
+            row = db.execute(
+                "SELECT stage,sent FROM state WHERE symbol=?",
+                (symbol,),
+            ).fetchone()
+
+        if not row:
+            return True
+
+        old_stage = int(row[0] or 0)
+        sent_time = float(row[1] or 0)
+
+        if stage > old_stage:
+            return True
+
+        return (
+            stage == old_stage
+            and time.time() - sent_time >= COOLDOWN
+        )
+
+    def sent(self, symbol, score, stage):
+
+        with self.lock, sqlite3.connect(self.path) as db:
+            db.execute(
+                """
+                INSERT INTO state(symbol,sent,score,stage)
+                VALUES(?,?,?,?)
+
+                ON CONFLICT(symbol)
+                DO UPDATE SET
+                    sent=excluded.sent,
+                    score=excluded.score,
+                    stage=excluded.stage
+                """,
+                (
+                    symbol,
+                    time.time(),
+                    score,
+                    stage,
+                ),
+            )
+
+    def get_oi(self, symbol):
+
+        with self.lock, sqlite3.connect(self.path) as db:
+            row = db.execute(
+                "SELECT value,ts FROM oi WHERE symbol=?",
+                (symbol,),
+            ).fetchone()
+
+        if not row:
+            return None
+
+        if time.time() - row[1] > SCAN_INTERVAL * 5:
+            return None
+
+        return float(row[0])
+
+    def put_oi(self, symbol, value):
+
+        if value is None:
+            return
+
+        with self.lock, sqlite3.connect(self.path) as db:
+            db.execute(
+                """
+                INSERT INTO oi(symbol,value,ts)
+                VALUES(?,?,?)
+
+                ON CONFLICT(symbol)
+                DO UPDATE SET
+                    value=excluded.value,
+                    ts=excluded.ts
+                """,
+                (
+                    symbol,
+                    value,
+                    time.time(),
+                ),
+            )
+
+
+DBS = DB(DB_PATH)
+
+
+def candidates(spot_tickers, futures_tickers):
+
+    futures_map = {
+        item.get("symbol"): item
+        for item in futures_tickers
+    }
+
+    output = []
+
+    for item in spot_tickers:
+
+        symbol = item.get("symbol", "")
+
+        if not symbol.endswith("USDT"):
+            continue
+
+        if symbol in EXCLUDED:
+            continue
+
+        if any(
+            symbol.endswith(x)
+            for x in (
+                "UPUSDT",
+                "DOWNUSDT",
+                "BULLUSDT",
+                "BEARUSDT",
+            )
+        ):
+            continue
+
+        future = futures_map.get(symbol)
+
+        if not future:
+            continue
+
+        try:
+
+            spot_volume = float(
+                item.get("quoteVolume", 0)
+            )
+
+            futures_volume = float(
+                future.get("quoteVolume", 0)
+            )
+
+            daily_change = float(
+                item.get("priceChangePercent", 0)
+            )
+
+            if spot_volume < MIN_VOLUME:
+                continue
+
+            if futures_volume < MIN_VOLUME:
+                continue
+
+            if daily_change > 16:
+                continue
+
+            output.append(symbol)
+
+        except (TypeError, ValueError):
+            continue
+
+    return output
+
+
+def analyze(symbol):
+
+    try:
+
+        spot = klines(
+            SPOT,
+            symbol,
+            "1m",
+            48,
+        )
+
+        futures = klines(
+            FUT,
+            symbol,
+            "1m",
+            36,
+        )
+
+        spot5 = klines(
+            SPOT,
+            symbol,
+            "5m",
+            18,
+        )
+
+        if (
+            len(spot) < 35
+            or len(futures) < 30
+            or len(spot5) < 10
+        ):
+            return {"status": "insufficient"}
+
+        live = spot[-1]
+
+        price = float(live[4])
+        live_open = float(live[1])
+        live_low = float(live[3])
+
+        live_change = pct(
+            live_open,
+            price,
+        )
+
+        closes5 = [
+            float(x[4])
+            for x in spot5
+        ]
+
+        m5 = pct(
+            closes5[-2],
+            price,
+        )
+
+        m15 = pct(
+            closes5[-4],
+            price,
+        )
+
+        m30 = pct(
+            closes5[-7],
+            price,
+        )
+
+        if (
+            live_change > 1.2
+            or m5 > 2.5
+            or m15 > 4.5
+            or m30 > 7
+        ):
+            return {"status": "late"}
+
+        if (
+            live_change < -2
+            or m5 < -3.5
+        ):
+            return {"status": "weak"}
+
+        closes = [
+            float(x[4])
+            for x in spot
+        ]
+
+        ma7 = avg(closes[-7:])
+        ma30 = avg(closes[-30:])
+
+        ma_difference = (
+            abs(ma7 - ma30)
+            / price
+            * 100
+        )
+
+        ma_squeeze = ma_difference <= 0.85
+
+        previous_ma = avg(
+            closes[-10:-3]
+        )
+
+        ma_turning_up = ma7 > previous_ma
+
+        closed = spot[:-1]
+
+        lows = [
+            float(x[3])
+            for x in closed[-30:]
+        ]
+
+        highs = [
+            float(x[2])
+            for x in closed[-30:]
+        ]
+
+        low_price = min(lows)
+        high_price = max(highs)
+
+        location = (
+            (price - low_price)
+            / (high_price - low_price)
+            * 100
+            if high_price > low_price
+            else 50
+        )
+
+        very_low = location <= 25
+        near_low = location <= 40
+
+        base_forming = (
+            location <= 35
+            and min(lows[-6:]) >= low_price
+        )
+
+        a = spot[-2]
+        b = spot[-3]
+
+        a_open = float(a[1])
+        a_high = float(a[2])
+        a_low = float(a[3])
+        a_close = float(a[4])
+
+        b_low = float(b[3])
+
+        higher_low = (
+            a_low > b_low
+            and live_low >= a_low
+        )
+
+        break_high = price > a_high
+
+        body = abs(
+            a_close - a_open
+        )
+
+        lower_wick = (
+            min(a_open, a_close)
+            - a_low
+        )
+
+        wick_rejection = (
+            lower_wick > 0
+            and lower_wick >= body * 0.8
+        )
+
+        reversal = (
+            higher_low
+            or break_high
+            or wick_rejection
+        )

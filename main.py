@@ -398,3 +398,169 @@ def adx(high, low, close, n=14):
     )
 
     return dx, pdi, mdi
+class DB:
+    def __init__(self, path):
+        self.path = path
+        self.lock = Lock()
+        with sqlite3.connect(path) as d:
+            d.execute("""
+                CREATE TABLE IF NOT EXISTS state(
+                    symbol TEXT PRIMARY KEY,
+                    stage INTEGER,
+                    score REAL,
+                    level TEXT,
+                    sent REAL
+                )
+            """)
+            d.execute("""
+                CREATE TABLE IF NOT EXISTS oi(
+                    symbol TEXT PRIMARY KEY,
+                    value REAL,
+                    ts REAL
+                )
+            """)
+
+    def get_state(self, symbol):
+        with self.lock, sqlite3.connect(self.path) as d:
+            return d.execute(
+                "SELECT stage,score,level,sent FROM state WHERE symbol=?",
+                (symbol,)
+            ).fetchone()
+
+    def save_state(self, symbol, stage, score, level):
+        with self.lock, sqlite3.connect(self.path) as d:
+            d.execute("""
+                INSERT INTO state VALUES(?,?,?,?,?)
+                ON CONFLICT(symbol) DO UPDATE SET
+                    stage=excluded.stage,
+                    score=excluded.score,
+                    level=excluded.level
+            """, (
+                symbol,
+                stage,
+                score,
+                level,
+                time.time()
+            ))
+
+    def can_send(self, symbol, level):
+        r = self.get_state(symbol)
+
+        if not r:
+            return True
+
+        old_stage, _, old_level, sent = r
+
+        rank = {
+            "AL": 1,
+            "VERY": 2
+        }
+
+        if rank.get(level, 0) > rank.get(old_level, 0):
+            return True
+
+        return time.time() - sent >= ALERT_COOLDOWN
+
+    def mark_sent(self, symbol, stage, score, level):
+        with self.lock, sqlite3.connect(self.path) as d:
+            d.execute("""
+                INSERT INTO state VALUES(?,?,?,?,?)
+                ON CONFLICT(symbol) DO UPDATE SET
+                    stage=excluded.stage,
+                    score=excluded.score,
+                    level=excluded.level,
+                    sent=excluded.sent
+            """, (
+                symbol,
+                stage,
+                score,
+                level,
+                time.time()
+            ))
+
+    def get_oi(self, symbol):
+        with self.lock, sqlite3.connect(self.path) as d:
+            r = d.execute(
+                "SELECT value,ts FROM oi WHERE symbol=?",
+                (symbol,)
+            ).fetchone()
+
+        if not r:
+            return None
+
+        if time.time() - r[1] > SCAN_INTERVAL * 5:
+            return None
+
+        return float(r[0])
+
+    def put_oi(self, symbol, value):
+        if value is None:
+            return
+
+        with self.lock, sqlite3.connect(self.path) as d:
+            d.execute("""
+                INSERT INTO oi VALUES(?,?,?)
+                ON CONFLICT(symbol) DO UPDATE SET
+                    value=excluded.value,
+                    ts=excluded.ts
+            """, (
+                symbol,
+                value,
+                time.time()
+            ))
+
+
+DBS = DB(DB_PATH)
+
+
+def tr_symbols(tickers):
+    out = []
+
+    for x in tickers:
+        s = x.get("symbol", "")
+
+        if not s.endswith("TRY"):
+            continue
+
+        if any(
+            z in s
+            for z in (
+                "UPTRY",
+                "DOWNTRY",
+                "BULLTRY",
+                "BEARTRY"
+            )
+        ):
+            continue
+
+        try:
+            volume = float(x.get("quoteVolume", 0))
+
+            if volume >= MIN_VOLUME_TRY:
+                out.append(s)
+
+        except (TypeError, ValueError):
+            continue
+
+    return out
+
+
+def build_candidate_map(tickers):
+    result = {}
+
+    for x in tickers:
+        s = x.get("symbol", "")
+
+        if not s.endswith("TRY"):
+            continue
+
+        try:
+            result[s] = {
+                "price": float(x.get("lastPrice", 0)),
+                "volume": float(x.get("quoteVolume", 0)),
+                "change": float(x.get("priceChangePercent", 0))
+            }
+        except (TypeError, ValueError):
+            pass
+
+    return result

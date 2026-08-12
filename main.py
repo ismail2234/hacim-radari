@@ -1287,3 +1287,232 @@ def analyze(item):
         return {
             "status": "error"
             }
+def message(result):
+
+    if result["status"] == "VERY":
+        title = "🔥 ÇOK GÜÇLÜ AL"
+    else:
+        title = "🟢 AL"
+
+    reasons = []
+
+    if result["breakout"]:
+        reasons.append("Direnç kırıldı")
+    elif result["dist"] <= 0.35:
+        reasons.append(
+            f"Direnç %{result['dist']:.2f}"
+        )
+
+    if result["vr"] >= 1.5:
+        reasons.append(
+            f"1m hacim {result['vr']:.1f}x"
+        )
+
+    if result["vr5"] >= 1.5:
+        reasons.append(
+            f"5m hacim {result['vr5']:.1f}x"
+        )
+
+    if result["imp"] >= 1.4:
+        reasons.append(
+            f"Hacim ivmesi {result['imp']:.1f}x"
+        )
+
+    if result["bp"] >= 65:
+        reasons.append(
+            f"Alıcı %{result['bp']:.0f}"
+        )
+
+    if result["ema"]:
+        reasons.append("EMA trend")
+
+    if result["macd"]:
+        reasons.append("MACD güçleniyor")
+
+    if result["hl"]:
+        reasons.append("Higher-Low")
+
+    if result["squeeze"]:
+        reasons.append("BB sıkışma")
+
+    return (
+        "🐋 BALİNA RADARI V21\n\n"
+        f"{title}\n\n"
+        f"🪙 #{result['symbol']}\n"
+        f"💰 {result['price']:.8g}\n"
+        f"💪 Güç: {result['score']}/100\n\n"
+        f"📊 1m Hacim: {result['vr']:.2f}x | "
+        f"5m: {result['vr5']:.2f}x\n"
+        f"🚀 İvme: {result['imp']:.2f}x\n"
+        f"🛒 Alıcı: %{result['bp']:.0f}\n"
+        f"📈 RSI: {result['rv']:.0f} | "
+        f"ADX: {result['ad']:.0f}\n"
+        f"🎯 Direnç: %{result['dist']:.2f}\n"
+        f"🚀 Kırılım: "
+        f"{'✅' if result['breakout'] else '⏳'}\n\n"
+        f"🔎 {' • '.join(reasons[:7])}\n\n"
+        f"{'🚀 Güçlü teyit.' if result['status'] == 'VERY' else '🎯 Alım teyidi oluştu.'}"
+    )
+
+
+def scan():
+
+    start = time.time()
+
+    data = tickers()
+
+    if not data:
+        return True
+
+    price_map = {}
+
+    for item in data:
+
+        try:
+
+            symbol = item.get("symbol")
+
+            price_map[symbol] = float(
+                item.get("lastPrice", 0)
+            )
+
+        except (TypeError, ValueError):
+
+            continue
+
+    DBS.update_outcomes(
+        price_map
+    )
+
+    all_candidates = candidates(
+        data
+    )
+
+    symbols = shortlist(
+        all_candidates
+    )
+
+    signals = []
+    stats = {}
+
+    with ThreadPoolExecutor(
+        max_workers=WORKERS
+    ) as executor:
+
+        jobs = [
+            executor.submit(
+                analyze,
+                item
+            )
+            for item in symbols
+        ]
+
+        for job in as_completed(jobs):
+
+            result = job.result()
+
+            status = result.get(
+                "status",
+                "error"
+            )
+
+            stats[status] = (
+                stats.get(status, 0)
+                +
+                1
+            )
+
+            if status in (
+                "BUY",
+                "VERY"
+            ):
+
+                signals.append(
+                    result
+                )
+
+    rank = {
+        "BUY": 1,
+        "VERY": 2
+    }
+
+    signals.sort(
+        key=lambda x: (
+            rank[x["status"]],
+            x["score"]
+        ),
+        reverse=True
+    )
+
+    sent = 0
+
+    for result in signals[
+        :MAX_SIGNALS
+    ]:
+
+        if not DBS.can_send(
+            result["symbol"],
+            result["status"]
+        ):
+            continue
+
+        if telegram(
+            message(result)
+        ):
+
+            DBS.put(
+                result["symbol"],
+                result["score"],
+                result["status"],
+                result["status"],
+                sent=time.time()
+            )
+
+            DBS.create_signal(
+                result["symbol"],
+                result["price"],
+                result["score"],
+                result["setup"],
+                result["confirmation"],
+                result["penalty"],
+                result["status"]
+            )
+
+            sent += 1
+
+        time.sleep(0.3)
+
+    elapsed = (
+        time.time()
+        -
+        start
+    )
+
+    errors = stats.get(
+        "error",
+        0
+    )
+
+    log.info(
+        "V21 | TRY:%d/%d | AL:%d | "
+        "VERY:%d | Hata:%d | "
+        "Gonder:%d | %.1fs",
+        len(symbols),
+        len(all_candidates),
+        stats.get("BUY", 0),
+        stats.get("VERY", 0),
+        errors,
+        sent,
+        elapsed
+    )
+
+    return (
+        errors
+        /
+        max(1, len(symbols))
+        > 0.30
+        or
+        elapsed
+        >
+        SCAN_INTERVAL * 1.25
+    )

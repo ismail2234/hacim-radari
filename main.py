@@ -821,3 +821,130 @@ def analyze(s):
     except Exception as e:
         log.debug("%s: %s",s,e)
         return {"status":"error"}
+# 4/5
+def message(r):
+    if r["status"]=="VERY":
+        title="🔥 ÇOK GÜÇLÜ AL"
+        emoji="🔥"
+    elif r["status"]=="BUY":
+        title="🟢 AL"
+        emoji="🟢"
+    else:
+        title="👀 TAKİP ET"
+        emoji="👀"
+
+    oi_txt="—"
+
+    if r["oi"] is not None:
+        oi_txt=f"{r['oi']:+.2f}%"
+
+    ema="🟢" if r["ema_bull"] else "🔴"
+    macd="🟢" if r["macd_up"] else "🔴"
+
+    return (
+        f"{emoji} BALİNA RADARI V18\n"
+        f"{title}\n\n"
+        f"🪙 #{r['symbol']}\n"
+        f"💰 {r['price']:.8g}\n"
+        f"💪 {r['score']}/100\n\n"
+
+        f"📈 EMA {'GÜÇLÜ' if r['ema_stack'] else 'YUKARI' if r['ema_bull'] else 'ZAYIF'} {ema}\n"
+        f"📊 RSI {r['rv']:.0f} {'↑' if r['rv']>50 else '↓'}\n"
+        f"〽️ MACD {'GÜÇLENİYOR' if r['macd_up'] else 'ZAYIF'} {macd}\n"
+        f"⚡ ADX {r['adx']:.0f}\n"
+        f"💥 Hacim {r['vol5']:.1f}x | Alıcı %{r['bp']:.0f}\n\n"
+
+        f"🎯 Direnç: %{r['dist']:.2f}\n"
+        f"🚀 Kırılım: {'✅' if r['breakout'] else '⏳'}\n"
+        f"📦 Sıkışma: {'✅' if r['squeeze'] else '—'}\n"
+        f"📈 Higher-Low: {'✅' if r['higher_low'] else '—'}\n"
+        f"💰 OI: {oi_txt}\n\n"
+
+        f"🔎 {' • '.join(r['reasons'][:7])}\n\n"
+
+        f"{'🔥 Güçlü kırılım teyidi.' if r['status']=='VERY' else '🟢 Alım teyidi güçleniyor.' if r['status']=='BUY' else '⏳ Kırılımı ve hacmi takip et.'}"
+    )
+
+def scan():
+    start=time.time()
+
+    st=tickers(SPOT)
+    ft=tickers(FUT)
+
+    if not st or not ft:
+        return True
+
+    syms=candidates(st,ft)
+
+    signals=[]
+    stats={}
+
+    with ThreadPoolExecutor(max_workers=WORKERS) as ex:
+        jobs=[ex.submit(analyze,s) for s in syms]
+
+        for j in as_completed(jobs):
+            r=j.result()
+            k=r.get("status","error")
+
+            stats[k]=stats.get(k,0)+1
+
+            if k in ("WATCH","BUY","VERY"):
+                signals.append(r)
+
+    rank={
+        "WATCH":1,
+        "BUY":2,
+        "VERY":3
+    }
+
+    signals.sort(
+        key=lambda x:(
+            rank[x["status"]],
+            x["score"],
+            x.get("volume_break",False),
+            x.get("vol5",0)
+        ),
+        reverse=True
+    )
+
+    sent=0
+
+    for r in signals:
+        if sent>=MAX_SIGNALS:
+            break
+
+        if not DBS.can_send(
+            r["symbol"],
+            r["status"]
+        ):
+            continue
+
+        if telegram(message(r)):
+            DBS.sent(
+                r["symbol"],
+                r["score"],
+                r["status"]
+            )
+            sent+=1
+
+        time.sleep(.5)
+
+    elapsed=time.time()-start
+    err=stats.get("error",0)
+    total=max(1,len(syms))
+
+    log.info(
+        "V18 | Aday:%d | Takip:%d | AL:%d | CokGuclu:%d | Hata:%d | Gonder:%d | %.1fs",
+        len(syms),
+        stats.get("WATCH",0),
+        stats.get("BUY",0),
+        stats.get("VERY",0),
+        err,
+        sent,
+        elapsed
+    )
+
+    return (
+        err/total>.30 or
+        elapsed>SCAN_INTERVAL*1.25
+    )

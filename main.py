@@ -1333,3 +1333,220 @@ def analyze(symbol):
         return {
             "status": "error"
         }
+# =========================
+# TELEGRAM MESAJI
+# =========================
+
+def message(r):
+
+    if r["status"] == "VERY":
+
+        title = "🔥 ÇOK GÜÇLÜ AL"
+
+        conclusion = (
+            "🚀 Çoklu teyit tamamlandı."
+        )
+
+    else:
+
+        title = "🟢 AL"
+
+        conclusion = (
+            "🎯 Teknik yapı olgunlaştı."
+        )
+
+
+    oi_txt = (
+        "—"
+        if r["oi"] is None
+        else f"{r['oi']:+.2f}%"
+    )
+
+
+    macd_state = (
+        "🟢"
+        if r["macd_up"]
+        else "🔴"
+    )
+
+
+    ema_state = (
+        "🟢"
+        if r["ema_up"]
+        else "🔴"
+    )
+
+
+    return (
+        f"🐋 BALİNA RADARI V19\n\n"
+
+        f"{title}\n\n"
+
+        f"🪙 #{r['symbol']}\n"
+        f"💰 {r['price']:.8g}\n"
+        f"💪 Güç: {r['score']}/100\n\n"
+
+        f"📈 EMA9/21: {ema_state}\n"
+        f"📊 RSI: {r['rv']:.0f}\n"
+        f"〽️ MACD: {macd_state}\n"
+        f"⚡ ADX: {r['adx']:.0f}\n\n"
+
+        f"💥 Spot hacim: {r['sr']:.2f}x\n"
+        f"💥 Futures hacim: {r['fr']:.2f}x\n"
+        f"💥 Hacim ivmesi: {r['imp']:.2f}x\n"
+        f"💰 Alıcı: %{r['bp']:.0f}\n\n"
+
+        f"🎯 Direnç: %{r['dist']:.2f}\n"
+        f"📦 Sıkışma: "
+        f"{'✅' if r['squeeze'] else '—'}\n"
+        f"📈 Higher-Low: "
+        f"{'✅' if r['higher_low'] else '—'}\n"
+        f"💰 OI: {oi_txt}\n\n"
+
+        f"🔎 "
+        f"{' • '.join(r['reasons'][:8])}\n\n"
+
+        f"{conclusion}"
+    )
+
+
+# =========================
+# TARAMA
+# =========================
+
+def scan():
+
+    start = time.time()
+
+    st = tickers(SPOT)
+    ft = tickers(FUT)
+
+    if not st or not ft:
+        return True
+
+
+    syms = candidates(
+        st,
+        ft
+    )
+
+
+    signals = []
+    stats = {}
+
+
+    with ThreadPoolExecutor(
+        max_workers=WORKERS
+    ) as ex:
+
+        jobs = [
+            ex.submit(
+                analyze,
+                s
+            )
+            for s in syms
+        ]
+
+
+        for j in as_completed(jobs):
+
+            r = j.result()
+
+            status = r.get(
+                "status",
+                "error"
+            )
+
+            stats[status] = (
+                stats.get(status, 0) + 1
+            )
+
+
+            # SADECE gerçek sinyaller
+            if status in (
+                "AL",
+                "VERY"
+            ):
+
+                signals.append(r)
+
+
+    # En güçlüleri önce
+    rank = {
+        "AL": 1,
+        "VERY": 2
+    }
+
+
+    signals.sort(
+        key=lambda x: (
+            rank[x["status"]],
+            x["score"],
+            x["bp"],
+            x["sr"]
+        ),
+        reverse=True
+    )
+
+
+    sent = 0
+
+
+    for r in signals[:MAX_SIGNALS]:
+
+        symbol = r["symbol"]
+        level = r["status"]
+
+
+        if not DBS.can_send(
+            symbol,
+            level
+        ):
+            continue
+
+
+        if telegram(
+            message(r)
+        ):
+
+            DBS.sent(
+                symbol,
+                r["score"],
+                level
+            )
+
+            sent += 1
+
+
+        time.sleep(0.5)
+
+
+    elapsed = time.time() - start
+
+    errors = stats.get(
+        "error",
+        0
+    )
+
+    total = max(
+        1,
+        len(syms)
+    )
+
+
+    log.info(
+        "V19 | Aday:%d | AL:%d | CokGuclu:%d | "
+        "Hata:%d | Gonder:%d | %.1fs",
+        len(syms),
+        stats.get("AL", 0),
+        stats.get("VERY", 0),
+        errors,
+        sent,
+        elapsed
+    )
+
+
+    return (
+        errors / total > 0.30
+        or elapsed > SCAN_INTERVAL * 1.25
+        )

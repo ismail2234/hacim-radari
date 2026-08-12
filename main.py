@@ -457,3 +457,369 @@ def adx(
     )
 
     return dx, pdi, mdi
+class DB:
+
+    def __init__(self, path):
+
+        self.path = path
+        self.lock = Lock()
+
+        with sqlite3.connect(path) as db:
+
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS state(
+                    symbol TEXT PRIMARY KEY,
+                    sent REAL DEFAULT 0,
+                    score REAL DEFAULT 0,
+                    level TEXT DEFAULT 'NONE',
+                    stage TEXT DEFAULT 'NONE',
+                    updated REAL DEFAULT 0
+                )
+            """)
+
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS signals(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol TEXT,
+                    ts REAL,
+                    price REAL,
+                    score REAL,
+                    setup REAL,
+                    confirmation REAL,
+                    penalty REAL,
+                    status TEXT,
+                    max_pct REAL DEFAULT 0,
+                    min_pct REAL DEFAULT 0,
+                    c1 REAL,
+                    c3 REAL,
+                    c5 REAL,
+                    c15 REAL
+                )
+            """)
+
+    def get(self, symbol):
+
+        with self.lock, sqlite3.connect(self.path) as db:
+            return db.execute(
+                """
+                SELECT sent, score, level, stage, updated
+                FROM state
+                WHERE symbol=?
+                """,
+                (symbol,)
+            ).fetchone()
+
+    def put(
+        self,
+        symbol,
+        score,
+        level,
+        stage,
+        sent=None
+    ):
+
+        with self.lock, sqlite3.connect(self.path) as db:
+
+            old = db.execute(
+                "SELECT sent FROM state WHERE symbol=?",
+                (symbol,)
+            ).fetchone()
+
+            sent_time = (
+                time.time()
+                if sent is not None
+                else old[0] if old else 0
+            )
+
+            db.execute(
+                """
+                INSERT INTO state(
+                    symbol,
+                    sent,
+                    score,
+                    level,
+                    stage,
+                    updated
+                )
+                VALUES(?,?,?,?,?,?)
+                ON CONFLICT(symbol)
+                DO UPDATE SET
+                    sent=excluded.sent,
+                    score=excluded.score,
+                    level=excluded.level,
+                    stage=excluded.stage,
+                    updated=excluded.updated
+                """,
+                (
+                    symbol,
+                    sent_time,
+                    score,
+                    level,
+                    stage,
+                    time.time()
+                )
+            )
+
+    def can_send(self, symbol, level):
+
+        row = self.get(symbol)
+
+        if not row:
+            return True
+
+        previous_sent = float(row[0] or 0)
+        previous_level = row[2]
+
+        rank = {
+            "BUY": 1,
+            "VERY": 2
+        }
+
+        old_rank = rank.get(
+            previous_level,
+            0
+        )
+
+        new_rank = rank.get(
+            level,
+            0
+        )
+
+        return (
+            time.time() - previous_sent >= COOLDOWN
+            or
+            new_rank > old_rank
+        )
+
+    def create_signal(
+        self,
+        symbol,
+        price,
+        score,
+        setup,
+        confirmation,
+        penalty,
+        status
+    ):
+
+        with self.lock, sqlite3.connect(self.path) as db:
+
+            cur = db.execute(
+                """
+                INSERT INTO signals(
+                    symbol,
+                    ts,
+                    price,
+                    score,
+                    setup,
+                    confirmation,
+                    penalty,
+                    status
+                )
+                VALUES(?,?,?,?,?,?,?,?)
+                """,
+                (
+                    symbol,
+                    time.time(),
+                    price,
+                    score,
+                    setup,
+                    confirmation,
+                    penalty,
+                    status
+                )
+            )
+
+            return cur.lastrowid
+
+    def update_outcomes(self, price_map):
+
+        now = time.time()
+
+        with self.lock, sqlite3.connect(self.path) as db:
+
+            rows = db.execute(
+                """
+                SELECT
+                    id,
+                    symbol,
+                    ts,
+                    price,
+                    max_pct,
+                    min_pct,
+                    c1,
+                    c3,
+                    c5,
+                    c15
+                FROM signals
+                WHERE c15 IS NULL
+                """
+            ).fetchall()
+
+            for row in rows:
+
+                (
+                    signal_id,
+                    symbol,
+                    ts,
+                    price,
+                    max_pct,
+                    min_pct,
+                    c1,
+                    c3,
+                    c5,
+                    c15
+                ) = row
+
+                current_price = price_map.get(symbol)
+
+                if (
+                    not current_price
+                    or not price
+                    or price <= 0
+                ):
+                    continue
+
+                change = (
+                    current_price - price
+                ) / price * 100
+
+                new_max = max(
+                    float(max_pct or 0),
+                    change
+                )
+
+                new_min = min(
+                    float(min_pct or 0),
+                    change
+                )
+
+                elapsed = now - ts
+
+                updates = {
+                    "max_pct": new_max,
+                    "min_pct": new_min
+                }
+
+                if elapsed >= 60 and c1 is None:
+                    updates["c1"] = change
+
+                if elapsed >= 180 and c3 is None:
+                    updates["c3"] = change
+
+                if elapsed >= 300 and c5 is None:
+                    updates["c5"] = change
+
+                if elapsed >= 900 and c15 is None:
+                    updates["c15"] = change
+
+                if updates:
+
+                    clause = ", ".join(
+                        f"{key}=?"
+                        for key in updates
+                    )
+
+                    db.execute(
+                        f"""
+                        UPDATE signals
+                        SET {clause}
+                        WHERE id=?
+                        """,
+                        (
+                            *updates.values(),
+                            signal_id
+                        )
+                    )
+
+    def performance_summary(self):
+
+        with self.lock, sqlite3.connect(self.path) as db:
+
+            return db.execute(
+                """
+                SELECT
+                    score,
+                    setup,
+                    confirmation,
+                    max_pct,
+                    min_pct,
+                    c5,
+                    c15
+                FROM signals
+                WHERE c15 IS NOT NULL
+                """
+            ).fetchall()
+
+
+DBS = DB(DB_PATH)
+
+
+def candidates(data):
+
+    result = []
+
+    for ticker in data:
+
+        symbol = ticker.get("symbol", "")
+
+        if not symbol.endswith("TRY"):
+            continue
+
+        if symbol in EXCLUDED:
+            continue
+
+        try:
+
+            quote_volume = float(
+                ticker.get("quoteVolume", 0)
+            )
+
+            change = float(
+                ticker.get("priceChangePercent", 0)
+            )
+
+            price = float(
+                ticker.get("lastPrice", 0)
+            )
+
+            if (
+                quote_volume < MIN_QUOTE_VOLUME
+                or price <= 0
+            ):
+                continue
+
+            result.append({
+                "symbol": symbol,
+                "volume": quote_volume,
+                "chg": change,
+                "price": price
+            })
+
+        except (TypeError, ValueError):
+
+            continue
+
+    return result
+
+
+def shortlist(items):
+
+    def ranking(item):
+
+        volume = item["volume"]
+        change = item["chg"]
+
+        activity = (
+            1
+            +
+            max(change, 0) / 100
+        )
+
+        return volume * activity
+
+    return sorted(
+        items,
+        key=ranking,
+        reverse=True
+    )[:SHORTLIST]

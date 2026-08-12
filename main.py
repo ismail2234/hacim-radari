@@ -214,3 +214,146 @@ def adx(h,l,c,n=14):
     dx=100*abs(pdi-mdi)/(pdi+mdi) if pdi+mdi else 0
 
     return dx,pdi,mdi
+# 2/5
+class DB:
+    def __init__(self,path):
+        self.path=path
+        self.lock=Lock()
+
+        with sqlite3.connect(path) as d:
+            d.execute(
+                "CREATE TABLE IF NOT EXISTS state("
+                "symbol TEXT PRIMARY KEY,"
+                "sent REAL,"
+                "score REAL,"
+                "level TEXT)"
+            )
+            d.execute(
+                "CREATE TABLE IF NOT EXISTS oi("
+                "symbol TEXT PRIMARY KEY,"
+                "value REAL,"
+                "ts REAL)"
+            )
+
+    def prev(self,s):
+        with self.lock,sqlite3.connect(self.path) as d:
+            return d.execute(
+                "SELECT score,level FROM state WHERE symbol=?",
+                (s,)
+            ).fetchone()
+
+    def getoi(self,s):
+        with self.lock,sqlite3.connect(self.path) as d:
+            r=d.execute(
+                "SELECT value,ts FROM oi WHERE symbol=?",
+                (s,)
+            ).fetchone()
+
+        if not r:
+            return None
+
+        if time.time()-r[1]>SCAN_INTERVAL*5:
+            return None
+
+        return float(r[0])
+
+    def putoi(self,s,v):
+        if v is None:
+            return
+
+        with self.lock,sqlite3.connect(self.path) as d:
+            d.execute(
+                "INSERT INTO oi VALUES(?,?,?) "
+                "ON CONFLICT(symbol) DO UPDATE SET "
+                "value=excluded.value,ts=excluded.ts",
+                (s,v,time.time())
+            )
+
+    def sent_time(self,s):
+        with self.lock,sqlite3.connect(self.path) as d:
+            r=d.execute(
+                "SELECT sent FROM state WHERE symbol=?",
+                (s,)
+            ).fetchone()
+
+        return r[0] if r else 0
+
+    def can_send(self,s,level):
+        r=self.prev(s)
+
+        if not r:
+            return True
+
+        rank={
+            "WATCH":1,
+            "BUY":2,
+            "VERY":3
+        }
+
+        old_rank=rank.get(r[1],0)
+        new_rank=rank.get(level,0)
+
+        if new_rank>old_rank:
+            return True
+
+        return time.time()-self.sent_time(s)>=COOLDOWN
+
+    def sent(self,s,score,level):
+        with self.lock,sqlite3.connect(self.path) as d:
+            d.execute(
+                "INSERT INTO state VALUES(?,?,?,?) "
+                "ON CONFLICT(symbol) DO UPDATE SET "
+                "sent=excluded.sent,"
+                "score=excluded.score,"
+                "level=excluded.level",
+                (s,time.time(),score,level)
+            )
+
+DBS=DB(DB_PATH)
+
+def candidates(st,ft):
+    fm={x.get("symbol"):x for x in ft}
+    out=[]
+
+    for x in st:
+        s=x.get("symbol","")
+
+        if not s.endswith("USDT"):
+            continue
+
+        if s in EXCLUDED:
+            continue
+
+        if any(
+            s.endswith(z)
+            for z in (
+                "UPUSDT","DOWNUSDT",
+                "BULLUSDT","BEARUSDT"
+            )
+        ):
+            continue
+
+        f=fm.get(s)
+
+        if not f:
+            continue
+
+        try:
+            sv=float(x.get("quoteVolume",0))
+            fv=float(f.get("quoteVolume",0))
+            chg=float(x.get("priceChangePercent",0))
+
+            if sv<MIN_VOLUME or fv<MIN_VOLUME:
+                continue
+
+            # Çok aşırı yükselmiş coinleri tamamen silme.
+            # Çünkü gerçek kırılım bazen 24s içinde zaten güçlüdür.
+            if chg>40:
+                continue
+
+            out.append(s)
+
+        except (TypeError,ValueError):
+            continue
+
+    return out

@@ -1058,3 +1058,162 @@ def analyze(symbol):
         return {
             "status": "error"
         }
+def message(r):
+    if r["status"] == "VERY":
+        title = "🔥 ÇOK GÜÇLÜ AL"
+        text = "🚀 Çoklu teyit tamamlandı."
+    else:
+        title = "🟢 AL"
+        text = "🎯 Teknik yapı teyit aldı."
+
+    oi = (
+        "—"
+        if r["oi"] is None
+        else f"{r['oi']:+.2f}%"
+    )
+
+    return (
+        f"🐋 BALİNA RADARI V20\n\n"
+        f"{title}\n"
+        f"━━━━━━━━━━━━━━━━━━\n\n"
+        f"🪙 #{r['symbol']}\n"
+        f"💰 {r['price']:.8g}\n"
+        f"💪 GÜÇ: {r['score']}/100\n\n"
+        f"📈 EMA9/21: "
+        f"{'🟢' if r['ema'] else '🔴'}\n"
+        f"📊 RSI: {r['rsi']:.0f}\n"
+        f"〽️ MACD: "
+        f"{'🟢' if r['macd'] else '🔴'}\n"
+        f"⚡ ADX: {r['adx']:.0f}\n\n"
+        f"💥 Hacim: {r['volume']:.2f}x\n"
+        f"🚀 Hacim ivmesi: {r['impulse']:.2f}x\n"
+        f"🟢 Alıcı: %{r['buyer']:.0f}\n"
+        f"🎯 Direnç: %{r['distance']:.2f}\n"
+        f"📦 BB: "
+        f"{'🟢 Sıkışma' if r['squeeze'] else '—'}\n"
+        f"📈 Higher-Low: "
+        f"{'✅' if r['higher_low'] else '—'}\n"
+        f"💰 OI: {oi}\n\n"
+        f"🔎 {' • '.join(r['reasons'][:8])}\n\n"
+        f"{text}\n"
+        f"⚠️ Teknik filtredir; risk yönetimi sana aittir."
+    )
+
+
+def scan():
+    started = time.time()
+
+    tickers = tr_tickers()
+
+    if not tickers:
+        log.warning("Binance TR ticker alınamadı.")
+        return True
+
+    symbols = tr_symbols(tickers)
+
+    if not symbols:
+        log.warning("Binance TR aday bulunamadı.")
+        return False
+
+    signals = []
+    stats = {}
+
+    with ThreadPoolExecutor(
+        max_workers=WORKERS
+    ) as ex:
+
+        jobs = [
+            ex.submit(
+                analyze,
+                s
+            )
+            for s in symbols
+        ]
+
+        for job in as_completed(jobs):
+
+            r = job.result()
+
+            status = r.get(
+                "status",
+                "error"
+            )
+
+            stats[status] = (
+                stats.get(status, 0) + 1
+            )
+
+            if status in (
+                "AL",
+                "VERY"
+            ):
+                signals.append(r)
+
+    rank = {
+        "AL": 1,
+        "VERY": 2
+    }
+
+    signals.sort(
+        key=lambda x: (
+            rank[x["status"]],
+            x["score"],
+            x["volume"],
+            x["buyer"]
+        ),
+        reverse=True
+    )
+
+    sent = 0
+
+    for r in signals[:MAX_ALERTS]:
+
+        symbol = r["symbol"]
+        level = r["status"]
+
+        if not DBS.can_send(
+            symbol,
+            level
+        ):
+            continue
+
+        if telegram(
+            message(r)
+        ):
+            DBS.mark_sent(
+                symbol,
+                r.get("stage", 3),
+                r["score"],
+                level
+            )
+            sent += 1
+
+        time.sleep(0.5)
+
+    elapsed = time.time() - started
+
+    errors = stats.get(
+        "error",
+        0
+    )
+
+    total = max(
+        1,
+        len(symbols)
+    )
+
+    log.info(
+        "V20 | TR:%d | AL:%d | VERY:%d | "
+        "Hata:%d | Gonder:%d | %.1fs",
+        len(symbols),
+        stats.get("AL", 0),
+        stats.get("VERY", 0),
+        errors,
+        sent,
+        elapsed
+    )
+
+    return (
+        errors / total > 0.30
+        or elapsed > SCAN_INTERVAL * 1.25
+    )

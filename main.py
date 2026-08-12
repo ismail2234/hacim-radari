@@ -564,3 +564,497 @@ def build_candidate_map(tickers):
             pass
 
     return result
+def analyze(symbol):
+    try:
+        sp = tr_klines(symbol, "1m", 180)
+        sp5 = tr_klines(symbol, "5m", 60)
+
+        if len(sp) < 100 or len(sp5) < 25:
+            return {"status": "PASS"}
+
+        live = sp[-1]
+        price = float(live[4])
+
+        c = [float(x[4]) for x in sp[:-1]]
+        h = [float(x[2]) for x in sp[:-1]]
+        l = [float(x[3]) for x in sp[:-1]]
+        o = [float(x[1]) for x in sp[:-1]]
+
+        c5 = [float(x[4]) for x in sp5[:-1]]
+
+        m1 = pct(c[-2], price)
+        m3 = pct(c[-4], price)
+        m5 = pct(c5[-2], price)
+        m15 = pct(c5[-4], price)
+
+        lo30 = min(l[-30:])
+        hi30 = max(h[-30:])
+
+        loc30 = (
+            (price - lo30) /
+            (hi30 - lo30) * 100
+            if hi30 > lo30 else 50
+        )
+
+        lo60 = min(l[-60:])
+        hi60 = max(h[-60:])
+
+        loc60 = (
+            (price - lo60) /
+            (hi60 - lo60) * 100
+            if hi60 > lo60 else 50
+        )
+
+        sv = [float(x[7]) for x in sp[:-1]]
+        tv = [float(x[8]) for x in sp[:-1]]
+
+        av = avg(sv[-36:])
+        at = avg(tv[-36:])
+
+        if av <= 0 or at <= 0:
+            return {"status": "PASS"}
+
+        volume_ratio = avg(sv[-3:]) / av
+        trade_ratio = avg(tv[-3:]) / at
+
+        old_volume = avg(sv[-9:-3])
+
+        volume_impulse = (
+            avg(sv[-3:]) / old_volume
+            if old_volume > 0 else 1
+        )
+
+        buy = sum(float(x[10]) for x in sp[-4:])
+        total = sum(float(x[7]) for x in sp[-4:])
+
+        buyer = (
+            buy / total * 100
+            if total > 0 else 50
+        )
+
+        e9 = ema(c, 9)
+        e21 = ema(c, 21)
+        e50 = ema(c, 50)
+
+        e9_old = ema(c[:-3], 9)
+        e21_old = ema(c[:-3], 21)
+
+        ema_bull = e9 > e21
+        ema_rising = e9 > e9_old
+        ema_cross = e9 > e21 and e9_old <= e21_old
+
+        rv = rsi(c)
+        rv_old = rsi(c[:-3])
+
+        rsi_rising = rv > rv_old
+
+        mm, ms, mh = macd(c)
+        pm, ps, ph = macd(c[:-3])
+
+        macd_rising = mh > ph
+        macd_bull = mm > ms
+
+        ad, di, mdi = adx(h, l, c)
+
+        trend = ad >= 18 and di > mdi
+
+        bl, bm, bu = bollinger(c)
+
+        width = (
+            (bu - bl) / bm * 100
+            if bm else 0
+        )
+
+        old_bl, old_bm, old_bu = bollinger(c[:-5])
+
+        old_width = (
+            (old_bu - old_bl) /
+            old_bm * 100
+            if old_bm else width
+        )
+
+        squeeze = (
+            width <= 1.8
+            or width < old_width * 0.82
+        )
+
+        expanding = (
+            width > old_width * 1.05
+            if old_width else False
+        )
+
+        resistance = max(h[-20:])
+
+        distance = max(
+            0,
+            (resistance - price) /
+            price * 100
+        )
+
+        recent_high = max(h[-8:])
+
+        breakout_now = price >= recent_high * 0.998
+
+        higher_low = (
+            l[-1] > l[-3]
+            and l[-3] >= l[-6]
+        )
+
+        candle_range = h[-1] - l[-1]
+
+        close_strength = (
+            (c[-1] - l[-1]) /
+            candle_range
+            if candle_range > 0 else 0.5
+        )
+
+        strong_close = close_strength >= 0.75
+
+        dip_score = 0
+
+        if loc30 <= 25:
+            dip_score += 10
+        elif loc30 <= 40:
+            dip_score += 6
+
+        if loc60 <= 30:
+            dip_score += 5
+
+        money_score = 0
+
+        if volume_ratio >= 3:
+            money_score += 12
+        elif volume_ratio >= 2:
+            money_score += 9
+        elif volume_ratio >= 1.5:
+            money_score += 6
+        elif volume_ratio >= 1.2:
+            money_score += 3
+
+        if trade_ratio >= 2:
+            money_score += 5
+        elif trade_ratio >= 1.5:
+            money_score += 3
+
+        if buyer >= 75:
+            money_score += 7
+        elif buyer >= 68:
+            money_score += 5
+        elif buyer >= 60:
+            money_score += 3
+
+        momentum_score = 0
+
+        if ema_bull:
+            momentum_score += 4
+
+        if ema_rising:
+            momentum_score += 3
+
+        if ema_cross:
+            momentum_score += 4
+
+        if rsi_rising and 40 <= rv <= 68:
+            momentum_score += 5
+        elif rsi_rising and 35 <= rv <= 72:
+            momentum_score += 3
+
+        if macd_rising:
+            momentum_score += 4
+
+        if macd_bull:
+            momentum_score += 3
+
+        if trend:
+            momentum_score += 4
+
+        if price >= e50:
+            momentum_score += 2
+
+        breakout_score = 0
+
+        if distance <= 0.10:
+            breakout_score += 10
+        elif distance <= 0.25:
+            breakout_score += 8
+        elif distance <= 0.50:
+            breakout_score += 5
+        elif distance <= 0.80:
+            breakout_score += 2
+
+        if breakout_now:
+            breakout_score += 6
+
+        if squeeze:
+            breakout_score += 4
+
+        if expanding and volume_impulse >= 1.25:
+            breakout_score += 4
+
+        if higher_low:
+            breakout_score += 4
+
+        if strong_close:
+            breakout_score += 3
+
+        risk = 0
+
+        if m15 < -1.5 and not higher_low:
+            risk -= 12
+
+        if rv > 80:
+            risk -= 10
+        elif rv > 75:
+            risk -= 5
+
+        if m5 > 4:
+            risk -= 10
+        elif m5 > 2.5:
+            risk -= 5
+
+        if buyer < 55 and volume_ratio >= 2:
+            risk -= 10
+
+        score = clamp(
+            dip_score +
+            money_score +
+            momentum_score +
+            breakout_score +
+            risk
+        )
+
+        oi_change = None
+
+        if score >= 68:
+            now_oi = futures_oi(
+                symbol.replace("TRY", "USDT")
+            )
+
+            old_oi = DBS.get_oi(symbol)
+
+            if now_oi is not None and old_oi is not None:
+                oi_change = pct(
+                    old_oi,
+                    now_oi
+                )
+
+                if oi_change >= 0.7:
+                    score = clamp(score + 3)
+
+                elif oi_change <= -1.5:
+                    score = clamp(score - 3)
+
+            DBS.put_oi(
+                symbol,
+                now_oi
+            )
+
+        state = DBS.get_state(symbol)
+
+        previous_stage = (
+            state[0]
+            if state else 0
+        )
+
+        previous_score = (
+            float(state[1])
+            if state else 0
+        )
+
+        if score >= previous_score + 5:
+            score = clamp(score + 3)
+
+        # -------------------------------------------------
+        # YENİ HAREKET / ESKİ PUMP AYRIMI
+        # -------------------------------------------------
+
+        fresh_move = (
+            volume_impulse >= 1.35
+            and volume_ratio >= 1.4
+            and (
+                breakout_now
+                or distance <= 0.35
+            )
+        )
+
+        late_move = (
+            m5 > 5
+            or m15 > 9
+            or (
+                rv > 82
+                and distance > 1.0
+            )
+        )
+
+        # -------------------------------------------------
+        # İÇ AŞAMALAR
+        # -------------------------------------------------
+
+        preparation = (
+            dip_score >= 6
+            and (
+                squeeze
+                or volume_ratio >= 1.2
+            )
+        )
+
+        strengthening = (
+            momentum_score >= 10
+            and money_score >= 8
+            and (
+                volume_ratio >= 1.2
+                or rsi_rising
+                or macd_rising
+            )
+        )
+
+        confirmed = (
+            score >= 78
+            and money_score >= 13
+            and momentum_score >= 12
+            and breakout_score >= 10
+            and volume_ratio >= 1.25
+            and buyer >= 58
+            and not late_move
+        )
+
+        very_confirmed = (
+            score >= 90
+            and money_score >= 17
+            and momentum_score >= 16
+            and breakout_score >= 14
+            and volume_ratio >= 1.5
+            and volume_impulse >= 1.15
+            and buyer >= 62
+            and not late_move
+        )
+
+        if very_confirmed:
+            level = "VERY"
+            stage = 4
+
+        elif confirmed:
+            level = "AL"
+            stage = 3
+
+        elif strengthening:
+            level = "INTERNAL"
+            stage = 2
+
+        elif preparation:
+            level = "INTERNAL"
+            stage = 1
+
+        else:
+            level = "PASS"
+            stage = 0
+
+        DBS.save_state(
+            symbol,
+            stage,
+            score,
+            level
+        )
+
+        if level == "INTERNAL" or level == "PASS":
+            return {
+                "status": "PASS",
+                "score": score,
+                "stage": stage
+            }
+
+        reasons = []
+
+        if volume_ratio >= 1.4:
+            reasons.append(
+                f"Hacim {volume_ratio:.2f}x"
+            )
+
+        if volume_impulse >= 1.3:
+            reasons.append(
+                f"İvme {volume_impulse:.2f}x"
+            )
+
+        if buyer >= 65:
+            reasons.append(
+                f"Alıcı %{buyer:.0f}"
+            )
+
+        if ema_bull:
+            reasons.append("EMA9>21")
+
+        if ema_rising:
+            reasons.append("EMA yükseliyor")
+
+        if rsi_rising:
+            reasons.append(
+                f"RSI {rv:.0f}↑"
+            )
+
+        if macd_rising:
+            reasons.append(
+                "MACD güçleniyor"
+            )
+
+        if trend:
+            reasons.append(
+                f"ADX {ad:.0f}"
+            )
+
+        if squeeze:
+            reasons.append(
+                "BB sıkışma"
+            )
+
+        if breakout_now:
+            reasons.append(
+                "Kırılım"
+            )
+
+        if higher_low:
+            reasons.append(
+                "Higher-Low"
+            )
+
+        if strong_close:
+            reasons.append(
+                "Güçlü kapanış"
+            )
+
+        if fresh_move:
+            reasons.append(
+                "Yeni hareket"
+            )
+
+        return {
+            "status": level,
+            "symbol": symbol,
+            "score": score,
+            "price": price,
+            "loc": loc30,
+            "buyer": buyer,
+            "volume": volume_ratio,
+            "futures_volume": 0,
+            "impulse": volume_impulse,
+            "rsi": rv,
+            "ema": ema_bull,
+            "macd": macd_rising,
+            "adx": ad,
+            "squeeze": squeeze,
+            "distance": distance,
+            "higher_low": higher_low,
+            "oi": oi_change,
+            "fresh": fresh_move,
+            "reasons": reasons
+        }
+
+    except Exception as e:
+        log.debug(
+            "%s analyze: %s",
+            symbol,
+            e
+        )
+
+        return {
+            "status": "error"
+        }

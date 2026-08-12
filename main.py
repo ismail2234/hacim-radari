@@ -948,3 +948,65 @@ def scan():
         err/total>.30 or
         elapsed>SCAN_INTERVAL*1.25
     )
+# 5/5
+app=Flask(__name__)
+
+@app.route("/")
+def home():
+    return "🐋 Balina Radarı V18 Aktif"
+
+@app.route("/health")
+def health():
+    return {
+        "status":"ok",
+        "bot":"Balina Radarı V18",
+        "scan_interval":SCAN_INTERVAL
+    }
+
+def loop():
+    log.info("🐋 BALINA RADARI V18 baslatiliyor...")
+
+    if TOKEN and CHAT:
+        telegram(
+            "🐋 BALİNA RADARI V18 AKTİF\n"
+            "👀 TAKİP ET → 🟢 AL → 🔥 ÇOK GÜÇLÜ AL"
+        )
+
+    while True:
+        t=time.time()
+
+        try:
+            backoff=scan()
+        except Exception:
+            log.exception("Tarama dongusu hatasi")
+            backoff=True
+
+        elapsed=time.time()-t
+
+        if backoff:
+            time.sleep(
+                max(
+                    180,
+                    SCAN_INTERVAL*3
+                )
+            )
+        else:
+            time.sleep(
+                max(
+                    1,
+                    SCAN_INTERVAL-elapsed
+                )
+            )
+
+Thread(
+    target=loop,
+    daemon=True,
+    name="balina-v18"
+).start()
+
+if __name__=="__main__":
+    app.run(
+        host="0.0.0.0",
+        port=int(os.getenv("PORT","8080")),
+        use_reloader=False
+                       )

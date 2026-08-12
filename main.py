@@ -324,3 +324,259 @@ def adx(h, l, c, n=14):
     )
 
     return dx, pdi, mdi
+# =========================
+# VERİTABANI
+# =========================
+
+class DB:
+
+    def __init__(self, path):
+
+        self.path = path
+        self.lock = Lock()
+
+        with sqlite3.connect(path) as d:
+
+            d.execute("""
+                CREATE TABLE IF NOT EXISTS signals(
+                    symbol TEXT PRIMARY KEY,
+                    sent REAL,
+                    score REAL,
+                    level TEXT
+                )
+            """)
+
+            d.execute("""
+                CREATE TABLE IF NOT EXISTS oi(
+                    symbol TEXT PRIMARY KEY,
+                    value REAL,
+                    ts REAL
+                )
+            """)
+
+
+    def previous(self, symbol):
+
+        with self.lock, sqlite3.connect(self.path) as d:
+
+            return d.execute(
+                """
+                SELECT score, level
+                FROM signals
+                WHERE symbol=?
+                """,
+                (symbol,)
+            ).fetchone()
+
+
+    def last_sent(self, symbol):
+
+        with self.lock, sqlite3.connect(self.path) as d:
+
+            r = d.execute(
+                """
+                SELECT sent
+                FROM signals
+                WHERE symbol=?
+                """,
+                (symbol,)
+            ).fetchone()
+
+        return r[0] if r else 0
+
+
+    def can_send(self, symbol, level):
+
+        r = self.previous(symbol)
+
+        if not r:
+            return True
+
+        old_level = r[1]
+
+        rank = {
+            "AL": 1,
+            "VERY": 2
+        }
+
+        old_rank = rank.get(old_level, 0)
+        new_rank = rank.get(level, 0)
+
+        # Daha güçlü seviyeye geçildiyse
+        # cooldown bekleme
+        if new_rank > old_rank:
+            return True
+
+        # Aynı seviyeyi tekrar tekrar gönderme
+        return (
+            time.time() -
+            self.last_sent(symbol)
+        ) >= COOLDOWN
+
+
+    def sent(self, symbol, score, level):
+
+        with self.lock, sqlite3.connect(self.path) as d:
+
+            d.execute(
+                """
+                INSERT INTO signals
+                VALUES(?,?,?,?)
+                ON CONFLICT(symbol)
+                DO UPDATE SET
+                    sent=excluded.sent,
+                    score=excluded.score,
+                    level=excluded.level
+                """,
+                (
+                    symbol,
+                    time.time(),
+                    score,
+                    level
+                )
+            )
+
+
+    def getoi(self, symbol):
+
+        with self.lock, sqlite3.connect(self.path) as d:
+
+            r = d.execute(
+                """
+                SELECT value, ts
+                FROM oi
+                WHERE symbol=?
+                """,
+                (symbol,)
+            ).fetchone()
+
+        if not r:
+            return None
+
+        if time.time() - r[1] > SCAN_INTERVAL * 5:
+            return None
+
+        return float(r[0])
+
+
+    def putoi(self, symbol, value):
+
+        if value is None:
+            return
+
+        with self.lock, sqlite3.connect(self.path) as d:
+
+            d.execute(
+                """
+                INSERT INTO oi
+                VALUES(?,?,?)
+                ON CONFLICT(symbol)
+                DO UPDATE SET
+                    value=excluded.value,
+                    ts=excluded.ts
+                """,
+                (
+                    symbol,
+                    value,
+                    time.time()
+                )
+            )
+
+
+DBS = DB(DB_PATH)
+
+
+# =========================
+# ARA SİNYAL HAFIZASI
+# =========================
+
+# Telegram'a gönderilmeyen erken aşamaları
+# bot kendi içinde takip eder.
+MEMORY = {}
+MEMORY_LOCK = Lock()
+
+
+def remember(symbol, score):
+
+    with MEMORY_LOCK:
+
+        old = MEMORY.get(symbol)
+
+        MEMORY[symbol] = {
+            "score": score,
+            "ts": time.time()
+        }
+
+    return old
+
+
+# =========================
+# ADAYLAR
+# =========================
+
+def candidates(st, ft):
+
+    futures = {
+        x.get("symbol"): x
+        for x in ft
+    }
+
+    out = []
+
+    for x in st:
+
+        symbol = x.get("symbol", "")
+
+        if not symbol.endswith("USDT"):
+            continue
+
+        if symbol in EXCLUDED:
+            continue
+
+        if any(
+            symbol.endswith(z)
+            for z in (
+                "UPUSDT",
+                "DOWNUSDT",
+                "BULLUSDT",
+                "BEARUSDT"
+            )
+        ):
+            continue
+
+        f = futures.get(symbol)
+
+        if not f:
+            continue
+
+        try:
+
+            spot_volume = float(
+                x.get("quoteVolume", 0)
+            )
+
+            futures_volume = float(
+                f.get("quoteVolume", 0)
+            )
+
+            change = float(
+                x.get("priceChangePercent", 0)
+            )
+
+            if (
+                spot_volume < MIN_VOLUME
+                or futures_volume < MIN_VOLUME
+            ):
+                continue
+
+            # Aşırı dikleşmiş coinleri
+            # ilk aşamada filtrele.
+            if change > 25:
+                continue
+
+            out.append(symbol)
+
+        except (TypeError, ValueError):
+            continue
+
+    return out

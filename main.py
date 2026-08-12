@@ -486,3 +486,533 @@ def symbol_quote(s):
 def futures_symbol(s):
     base=s[:-3] if s.endswith("TRY") else s[:-4]
     return base+"USDT"
+def analyze(s):
+    try:
+        sp=tr_klines(s,"1m",180)
+        sp5=tr_klines(s,"5m",60)
+
+        if len(sp)<100 or len(sp5)<25:
+            return {"status":"PASS"}
+
+        live=sp[-1]
+        price=float(live[4])
+
+        c=[float(x[4]) for x in sp[:-1]]
+        h=[float(x[2]) for x in sp[:-1]]
+        l=[float(x[3]) for x in sp[:-1]]
+        o=[float(x[1]) for x in sp[:-1]]
+
+        c5=[float(x[4]) for x in sp5[:-1]]
+
+        m1=pct(c[-2],price)
+        m3=pct(c[-4],price)
+        m5=pct(c5[-2],price)
+        m15=pct(c5[-4],price)
+
+        lo30=min(l[-30:])
+        hi30=max(h[-30:])
+        loc30=(
+            (price-lo30)/(hi30-lo30)*100
+            if hi30>lo30 else 50
+        )
+
+        lo60=min(l[-60:])
+        hi60=max(h[-60:])
+        loc60=(
+            (price-lo60)/(hi60-lo60)*100
+            if hi60>lo60 else 50
+        )
+
+        sv=[float(x[7]) for x in sp[:-1]]
+        tv=[float(x[8]) for x in sp[:-1]]
+
+        av=avg(sv[-36:])
+        at=avg(tv[-36:])
+
+        if av<=0 or at<=0:
+            return {"status":"PASS"}
+
+        vol_ratio=avg(sv[-3:])/av
+        trade_ratio=avg(tv[-3:])/at
+
+        old_vol=avg(sv[-9:-3])
+        impulse=(
+            avg(sv[-3:])/old_vol
+            if old_vol>0 else 1
+        )
+
+        # Binance kline:
+        # [10] taker buy base volume
+        # [11] taker buy quote volume
+        buy=sum(float(x[11]) for x in sp[-4:])
+        total=sum(float(x[7]) for x in sp[-4:])
+
+        buyer=(
+            buy/total*100
+            if total>0 else 50
+        )
+
+        e9=ema(c,9)
+        e21=ema(c,21)
+        e50=ema(c,50)
+
+        e9_old=ema(c[:-3],9)
+        e21_old=ema(c[:-3],21)
+
+        ema_bull=e9>e21
+        ema_rising=e9>e9_old
+        ema_cross=(
+            e9>e21 and
+            e9_old<=e21_old
+        )
+
+        rv=rsi(c)
+        rv_old=rsi(c[:-3])
+
+        rsi_up=rv>rv_old
+
+        mm,ms,mh=macd(c)
+        pm,ps,ph=macd(c[:-3])
+
+        macd_up=mh>ph
+        macd_bull=mm>ms
+
+        ad,di,mdi=adx(h,l,c)
+
+        trend=(
+            ad>=18 and
+            di>mdi
+        )
+
+        bl,bm,bu=bb(c)
+
+        width=(
+            (bu-bl)/bm*100
+            if bm else 0
+        )
+
+        obl,obm,obu=bb(c[:-5])
+
+        old_width=(
+            (obu-obl)/obm*100
+            if obm else width
+        )
+
+        squeeze=(
+            width<=1.8
+            or width<old_width*.82
+        )
+
+        expanding=(
+            width>old_width*1.05
+            if old_width else False
+        )
+
+        resistance=max(h[-20:])
+
+        distance=max(
+            0,
+            (resistance-price)/price*100
+        )
+
+        breakout_now=(
+            price>=resistance*.998
+        )
+
+        higher_low=(
+            l[-1]>l[-3]
+            and l[-3]>=l[-6]
+        )
+
+        candle_range=h[-1]-l[-1]
+
+        close_strength=(
+            (c[-1]-l[-1])/candle_range
+            if candle_range>0 else .5
+        )
+
+        strong_close=close_strength>=.75
+
+        # ---------------------------------------------
+        # PARA AKIŞI
+        # ---------------------------------------------
+
+        money=0
+
+        if vol_ratio>=3:
+            money+=12
+        elif vol_ratio>=2:
+            money+=9
+        elif vol_ratio>=1.5:
+            money+=6
+        elif vol_ratio>=1.2:
+            money+=3
+
+        if trade_ratio>=2:
+            money+=5
+        elif trade_ratio>=1.5:
+            money+=3
+
+        if buyer>=75:
+            money+=7
+        elif buyer>=68:
+            money+=5
+        elif buyer>=60:
+            money+=3
+
+        # ---------------------------------------------
+        # MOMENTUM
+        # ---------------------------------------------
+
+        momentum=0
+
+        if ema_bull:
+            momentum+=4
+
+        if ema_rising:
+            momentum+=3
+
+        if ema_cross:
+            momentum+=4
+
+        if rsi_up and 40<=rv<=68:
+            momentum+=5
+        elif rsi_up and 35<=rv<=72:
+            momentum+=3
+
+        if macd_up:
+            momentum+=4
+
+        if macd_bull:
+            momentum+=3
+
+        if trend:
+            momentum+=4
+
+        if price>=e50:
+            momentum+=2
+
+        # ---------------------------------------------
+        # BREAKOUT
+        # ---------------------------------------------
+
+        breakout=0
+
+        if distance<=.10:
+            breakout+=10
+        elif distance<=.25:
+            breakout+=8
+        elif distance<=.50:
+            breakout+=5
+        elif distance<=.80:
+            breakout+=2
+
+        if breakout_now:
+            breakout+=6
+
+        if squeeze:
+            breakout+=4
+
+        if expanding and impulse>=1.25:
+            breakout+=4
+
+        if higher_low:
+            breakout+=4
+
+        if strong_close:
+            breakout+=3
+
+        # ---------------------------------------------
+        # DİP / YAPI
+        # ---------------------------------------------
+
+        structure=0
+
+        if loc30<=25:
+            structure+=8
+        elif loc30<=40:
+            structure+=5
+
+        if loc60<=30:
+            structure+=4
+
+        if squeeze:
+            structure+=3
+
+        # ---------------------------------------------
+        # RİSK
+        # ---------------------------------------------
+
+        risk=0
+
+        if m15<-1.5 and not higher_low:
+            risk-=12
+
+        if rv>82:
+            risk-=10
+        elif rv>76:
+            risk-=5
+
+        if m5>6:
+            risk-=10
+        elif m5>3.5:
+            risk-=5
+
+        if buyer<55 and vol_ratio>=2:
+            risk-=10
+
+        # ---------------------------------------------
+        # YENİ HAREKET / GEÇ HAREKET
+        # ---------------------------------------------
+
+        fresh_move=(
+            impulse>=1.35
+            and vol_ratio>=1.4
+            and (
+                breakout_now
+                or distance<=.35
+            )
+            and buyer>=58
+        )
+
+        late_move=(
+            (
+                m5>8
+                and impulse<1.15
+            )
+            or (
+                rv>84
+                and m3>4
+                and distance>1
+            )
+        )
+
+        # ---------------------------------------------
+        # TOPLAM
+        # ---------------------------------------------
+
+        score=clamp(
+            structure+
+            money+
+            momentum+
+            breakout+
+            risk
+        )
+
+        # ---------------------------------------------
+        # OI YARDIMCI TEYİT
+        # ---------------------------------------------
+
+        oi_change=None
+
+        if score>=68:
+
+            fs=futures_symbol(s)
+            now_oi=futures_oi(fs)
+            old_oi=DBS.get_oi(s)
+
+            if (
+                now_oi is not None
+                and old_oi is not None
+            ):
+                oi_change=pct(
+                    old_oi,
+                    now_oi
+                )
+
+                if oi_change>=.7:
+                    score=clamp(score+3)
+
+                elif oi_change<=-1.5:
+                    score=clamp(score-3)
+
+            DBS.put_oi(
+                s,
+                now_oi
+            )
+
+        # ---------------------------------------------
+        # DURUM
+        # ---------------------------------------------
+
+        old=DBS.state(s)
+
+        old_score=(
+            float(old[1])
+            if old else 0
+        )
+
+        old_stage=(
+            int(old[0])
+            if old else 0
+        )
+
+        # Coin zaman içinde güçleniyorsa
+        # küçük devamlılık bonusu.
+        if score>=old_score+5:
+            score=clamp(score+3)
+
+        preparation=(
+            structure>=6
+            and (
+                squeeze
+                or vol_ratio>=1.2
+            )
+        )
+
+        strengthening=(
+            money>=8
+            and momentum>=10
+            and (
+                vol_ratio>=1.2
+                or rsi_up
+                or macd_up
+            )
+        )
+
+        confirmed=(
+            score>=78
+            and money>=13
+            and momentum>=12
+            and breakout>=10
+            and vol_ratio>=1.25
+            and buyer>=58
+            and not late_move
+        )
+
+        very=(
+            score>=90
+            and money>=17
+            and momentum>=16
+            and breakout>=14
+            and vol_ratio>=1.5
+            and impulse>=1.15
+            and buyer>=62
+            and not late_move
+        )
+
+        if very:
+            level="VERY"
+            stage=4
+        elif confirmed:
+            level="AL"
+            stage=3
+        elif strengthening:
+            level="INTERNAL"
+            stage=max(2,old_stage)
+        elif preparation:
+            level="INTERNAL"
+            stage=max(1,old_stage)
+        else:
+            level="PASS"
+            stage=0
+
+        DBS.save_state(
+            s,
+            stage,
+            score
+        )
+
+        if level not in ("AL","VERY"):
+            return {
+                "status":"PASS",
+                "score":score,
+                "stage":stage
+            }
+
+        reasons=[]
+
+        if vol_ratio>=1.3:
+            reasons.append(
+                f"Hacim {vol_ratio:.2f}x"
+            )
+
+        if impulse>=1.25:
+            reasons.append(
+                f"İvme {impulse:.2f}x"
+            )
+
+        if buyer>=65:
+            reasons.append(
+                f"Alıcı %{buyer:.0f}"
+            )
+
+        if ema_bull:
+            reasons.append("EMA9>21")
+
+        if ema_rising:
+            reasons.append("EMA yükseliyor")
+
+        if rsi_up:
+            reasons.append(
+                f"RSI {rv:.0f}↑"
+            )
+
+        if macd_up:
+            reasons.append(
+                "MACD güçleniyor"
+            )
+
+        if trend:
+            reasons.append(
+                f"ADX {ad:.0f}"
+            )
+
+        if squeeze:
+            reasons.append(
+                "BB sıkışma"
+            )
+
+        if breakout_now:
+            reasons.append(
+                "Kırılım"
+            )
+
+        if higher_low:
+            reasons.append(
+                "Higher-Low"
+            )
+
+        if strong_close:
+            reasons.append(
+                "Güçlü kapanış"
+            )
+
+        if fresh_move:
+            reasons.append(
+                "Yeni hareket"
+            )
+
+        if oi_change is not None and oi_change>=.7:
+            reasons.append(
+                f"OI +{oi_change:.2f}%"
+            )
+
+        return {
+            "status":level,
+            "stage":stage,
+            "symbol":s,
+            "price":price,
+            "score":score,
+            "loc":loc30,
+            "buyer":buyer,
+            "volume":vol_ratio,
+            "impulse":impulse,
+            "rsi":rv,
+            "ema":ema_bull,
+            "macd":macd_up,
+            "adx":ad,
+            "squeeze":squeeze,
+            "distance":distance,
+            "higher_low":higher_low,
+            "oi":oi_change,
+            "fresh":fresh_move,
+            "reasons":reasons
+        }
+
+    except Exception as e:
+        log.debug(
+            "%s analyze: %s",
+            s,e
+        )
+        return {"status":"error"}

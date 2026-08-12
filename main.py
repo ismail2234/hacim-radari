@@ -1217,3 +1217,101 @@ def scan():
         errors / total > 0.30
         or elapsed > SCAN_INTERVAL * 1.25
     )
+app = Flask(__name__)
+
+
+@app.route("/")
+def home():
+    return "🐋 BALİNA RADARI V20 AKTİF"
+
+
+@app.route("/health")
+def health():
+    return {
+        "status": "ok",
+        "bot": "Balina Radarı V20",
+        "market": "Binance TR",
+        "scan_interval": SCAN_INTERVAL,
+        "telegram": [
+            "AL",
+            "VERY"
+        ]
+    }
+
+
+def loop():
+
+    log.info(
+        "🐋 BALİNA RADARI V20 başlatılıyor..."
+    )
+
+    if TOKEN and CHAT:
+        telegram(
+            "🐋 BALİNA RADARI V20 AKTİF\n\n"
+            "🇹🇷 Binance TR ana piyasa\n"
+            "🔇 Hazırlık mesajları kapalı\n"
+            "🔇 Takip mesajları kapalı\n"
+            "🟢 AL\n"
+            "🔥 ÇOK GÜÇLÜ AL"
+        )
+
+    while True:
+
+        started = time.time()
+
+        try:
+            backoff = scan()
+
+        except Exception:
+            log.exception(
+                "Tarama döngüsü hatası"
+            )
+            backoff = True
+
+        elapsed = (
+            time.time() - started
+        )
+
+        if backoff:
+
+            wait = max(
+                180,
+                SCAN_INTERVAL * 3
+            )
+
+            log.warning(
+                "Koruma beklemesi: %ds",
+                wait
+            )
+
+            time.sleep(wait)
+
+        else:
+
+            time.sleep(
+                max(
+                    1,
+                    SCAN_INTERVAL - elapsed
+                )
+            )
+
+
+Thread(
+    target=loop,
+    daemon=True,
+    name="balina-v20"
+).start()
+
+
+if __name__ == "__main__":
+
+    app.run(
+        host="0.0.0.0",
+        port=int(
+            os.getenv(
+                "PORT",
+                "8080"
+            )
+        ),
+        use_reloader=False
+            )

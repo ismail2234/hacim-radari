@@ -2433,3 +2433,218 @@ def scan():
         >
         SCAN_INTERVAL * 1.25
         )
+app = Flask(__name__)
+
+
+@app.route("/")
+def home():
+
+    return (
+        "🐋 Balina Radarı V21 Aktif"
+    )
+
+
+@app.route("/health")
+def health():
+
+    return {
+        "status": "ok",
+        "bot": "Balina Radarı V21",
+        "base": BASE,
+        "scan_interval": SCAN_INTERVAL
+    }
+
+
+@app.route("/performance")
+def performance():
+
+    rows = DBS.performance_summary()
+
+    if not rows:
+
+        return {
+            "samples": 0,
+            "note":
+            "Henüz 15dk+ tamamlanmış "
+            "sinyal yok."
+        }
+
+
+    n = len(rows)
+
+    avg_max = (
+        sum(r[3] for r in rows)
+        /
+        n
+    )
+
+    avg_min = (
+        sum(r[4] for r in rows)
+        /
+        n
+    )
+
+    avg_c15 = (
+        sum(r[6] for r in rows)
+        /
+        n
+    )
+
+
+    return {
+
+        "samples": n,
+
+        "avg_max_pct":
+            round(
+                avg_max,
+                2
+            ),
+
+        "avg_min_pct":
+            round(
+                avg_min,
+                2
+            ),
+
+        "avg_15m_pct":
+            round(
+                avg_c15,
+                2
+            )
+    }
+
+
+def validate_market():
+
+    info = exchange_info()
+
+    symbols = {
+        item.get("symbol")
+        for item in info.get(
+            "symbols",
+            []
+        )
+    }
+
+
+    try_count = sum(
+        symbol.endswith("TRY")
+        for symbol in symbols
+        if symbol
+    )
+
+
+    if try_count <= 0:
+
+        raise RuntimeError(
+            f"BASE {BASE} üzerinde "
+            "TRY marketi bulunamadı. "
+            "BINANCE_TR_BASE "
+            "kontrol edilmeli."
+        )
+
+
+    log.info(
+        "V21 | Binance TR market "
+        "doğrulandı | TRY:%d",
+        try_count
+    )
+
+
+def loop():
+
+    log.info(
+        "🐋 BALİNA RADARI V21 "
+        "başlatılıyor..."
+    )
+
+
+    try:
+
+        validate_market()
+
+    except Exception as e:
+
+        log.exception(
+            "MARKET DOĞRULAMA HATASI: %s",
+            e
+        )
+
+        return
+
+
+    if TOKEN and CHAT:
+
+        telegram(
+            "🐋 BALİNA RADARI V21 AKTİF\n"
+            "🟢 AL → 🔥 ÇOK GÜÇLÜ AL\n"
+            "📅 30d/90d trend koruması aktif"
+        )
+
+
+    while True:
+
+        started = time.time()
+
+
+        try:
+
+            backoff = scan()
+
+        except Exception:
+
+            log.exception(
+                "Tarama döngüsü hatası"
+            )
+
+            backoff = True
+
+
+        elapsed = (
+            time.time()
+            -
+            started
+        )
+
+
+        if backoff:
+
+            time.sleep(
+                max(
+                    180,
+                    SCAN_INTERVAL * 3
+                )
+            )
+
+        else:
+
+            time.sleep(
+                max(
+                    1,
+                    SCAN_INTERVAL
+                    -
+                    elapsed
+                )
+            )
+
+
+Thread(
+    target=loop,
+    daemon=True,
+    name="balina-v21"
+).start()
+
+
+if __name__ == "__main__":
+
+    app.run(
+        host="0.0.0.0",
+        port=int(
+            os.getenv(
+                "PORT",
+                "8080"
+            )
+        ),
+        use_reloader=False
+    )

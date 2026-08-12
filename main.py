@@ -510,3 +510,607 @@ def adx(highs, lows, closes, period=14):
         plus_di,
         minus_di
 )
+# ============================================================
+# DATABASE
+# ============================================================
+
+class DB:
+
+    def __init__(self, path):
+
+        self.path = path
+        self.lock = Lock()
+
+        with sqlite3.connect(path) as db:
+
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS state(
+                    symbol TEXT PRIMARY KEY,
+                    sent REAL DEFAULT 0,
+                    score REAL DEFAULT 0,
+                    level TEXT DEFAULT 'NONE',
+                    stage TEXT DEFAULT 'NONE',
+                    updated REAL DEFAULT 0
+                )
+            """)
+
+
+    def get(self, symbol):
+
+        with (
+            self.lock,
+            sqlite3.connect(self.path) as db
+        ):
+
+            return db.execute(
+                """
+                SELECT
+                    sent,
+                    score,
+                    level,
+                    stage,
+                    updated
+                FROM state
+                WHERE symbol=?
+                """,
+                (symbol,)
+            ).fetchone()
+
+
+    def put(
+        self,
+        symbol,
+        score,
+        level,
+        stage,
+        sent=None
+    ):
+
+        with (
+            self.lock,
+            sqlite3.connect(self.path) as db
+        ):
+
+            old = db.execute(
+                """
+                SELECT sent
+                FROM state
+                WHERE symbol=?
+                """,
+                (symbol,)
+            ).fetchone()
+
+            sent_time = (
+                time.time()
+                if sent is not None
+                else (
+                    old[0]
+                    if old
+                    else 0
+                )
+            )
+
+            db.execute(
+                """
+                INSERT INTO state(
+                    symbol,
+                    sent,
+                    score,
+                    level,
+                    stage,
+                    updated
+                )
+                VALUES(
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?
+                )
+
+                ON CONFLICT(symbol)
+                DO UPDATE SET
+                    sent=excluded.sent,
+                    score=excluded.score,
+                    level=excluded.level,
+                    stage=excluded.stage,
+                    updated=excluded.updated
+                """,
+                (
+                    symbol,
+                    sent_time,
+                    score,
+                    level,
+                    stage,
+                    time.time()
+                )
+            )
+
+
+    def can_send(
+        self,
+        symbol,
+        level
+    ):
+
+        row = self.get(symbol)
+
+        if not row:
+            return True
+
+        previous_sent = float(
+            row[0] or 0
+        )
+
+        previous_level = row[2]
+
+        rank = {
+            "BUY": 1,
+            "VERY": 2
+        }
+
+        old_rank = rank.get(
+            previous_level,
+            0
+        )
+
+        new_rank = rank.get(
+            level,
+            0
+        )
+
+        return (
+            time.time()
+            -
+            previous_sent
+            >=
+            COOLDOWN
+        ) or (
+            new_rank > old_rank
+        )
+
+
+DBS = DB(DB_PATH)
+
+
+# ============================================================
+# ADAYLAR
+# ============================================================
+
+def candidates(data):
+
+    result = []
+
+    for ticker in data:
+
+        symbol = ticker.get(
+            "symbol",
+            ""
+        )
+
+        # SADECE Binance TR TRY marketleri
+        if not symbol.endswith("TRY"):
+            continue
+
+        if symbol in EXCLUDED:
+            continue
+
+        try:
+
+            quote_volume = float(
+                ticker.get(
+                    "quoteVolume",
+                    0
+                )
+            )
+
+            change = float(
+                ticker.get(
+                    "priceChangePercent",
+                    0
+                )
+            )
+
+            price = float(
+                ticker.get(
+                    "lastPrice",
+                    0
+                )
+            )
+
+            if quote_volume < MIN_QUOTE_VOLUME:
+                continue
+
+            # Zaten aşırı kaçmış coinleri
+            # doğrudan AL olarak kovalamıyoruz.
+            if change > 25:
+                continue
+
+            result.append({
+                "symbol": symbol,
+                "volume": quote_volume,
+                "chg": change,
+                "price": price
+            })
+
+        except (
+            TypeError,
+            ValueError
+        ):
+
+            continue
+
+    return result
+
+
+def shortlist(items):
+
+    def ranking(item):
+
+        volume = item["volume"]
+
+        positive_change = max(
+            item["chg"],
+            0
+        )
+
+        return (
+            volume
+            *
+            (
+                1
+                +
+                positive_change / 100
+            )
+        )
+
+    return sorted(
+        items,
+        key=ranking,
+        reverse=True
+    )[:SHORTLIST]
+
+
+# ============================================================
+# ANA ANALİZ
+# ============================================================
+
+def analyze(item):
+
+    symbol = item["symbol"]
+    price = item["price"]
+
+    try:
+
+        # Önce 5 dakika.
+        # Böylece her coin için aynı anda
+        # 1m + 5m yükü oluşturmuyoruz.
+
+        k5 = klines(
+            symbol,
+            "5m",
+            80
+        )
+
+        if len(k5) < 40:
+            return {
+                "status": "PASS"
+            }
+
+        closed_5m = k5[:-1]
+
+        close5 = [
+            float(x[4])
+            for x in closed_5m
+        ]
+
+        volume5 = [
+            float(x[7])
+            for x in closed_5m
+        ]
+
+        average_5m_volume = avg(
+            volume5[-12:]
+        )
+
+        recent_5m_volume = avg(
+            volume5[-3:]
+        )
+
+        volume5_ratio = (
+            recent_5m_volume
+            /
+            average_5m_volume
+            if average_5m_volume
+            else 0
+        )
+
+        momentum_15m = pct(
+            close5[-4],
+            price
+        )
+
+        # Tamamen ölü coinleri
+        # 1m derin taramaya sokma.
+        if (
+            momentum_15m < -3
+            and
+            volume5_ratio < 1.3
+        ):
+            return {
+                "status": "PASS"
+            }
+
+
+        # ----------------------------------------------------
+        # 1 DAKİKALIK DERİN ANALİZ
+        # ----------------------------------------------------
+
+        k1 = klines(
+            symbol,
+            "1m",
+            180
+        )
+
+        if len(k1) < 100:
+            return {
+                "status": "PASS"
+            }
+
+        # Açık mum kullanılmıyor.
+        closed_1m = k1[:-1]
+
+        close = [
+            float(x[4])
+            for x in closed_1m
+        ]
+
+        high = [
+            float(x[2])
+            for x in closed_1m
+        ]
+
+        low = [
+            float(x[3])
+            for x in closed_1m
+        ]
+
+        open_price = [
+            float(x[1])
+            for x in closed_1m
+        ]
+
+        volume = [
+            float(x[7])
+            for x in closed_1m
+        ]
+
+        if price <= 0:
+            price = close[-1]
+
+
+        # ----------------------------------------------------
+        # FİYAT İVMESİ
+        # ----------------------------------------------------
+
+        momentum_1m = pct(
+            close[-2],
+            price
+        )
+
+        momentum_5m = pct(
+            close5[-2],
+            price
+        )
+
+        low_90 = min(
+            low[-90:]
+        )
+
+        high_90 = max(
+            high[-90:]
+        )
+
+        location = (
+            (
+                price - low_90
+            )
+            /
+            (
+                high_90 - low_90
+            )
+            *
+            100
+            if high_90 > low_90
+            else 50
+        )
+
+
+        # ----------------------------------------------------
+        # HACİM İVMESİ
+        # ----------------------------------------------------
+
+        average_volume = avg(
+            volume[-30:]
+        )
+
+        last_3_volume = avg(
+            volume[-3:]
+        )
+
+        previous_volume = avg(
+            volume[-10:-3]
+        )
+
+        volume_ratio = (
+            last_3_volume
+            /
+            average_volume
+            if average_volume
+            else 0
+        )
+
+        volume_impulse = (
+            last_3_volume
+            /
+            previous_volume
+            if previous_volume
+            else 1
+        )
+
+
+        # ----------------------------------------------------
+        # ALICI BASKISI
+        # Binance kline:
+        # x[10] = taker buy quote volume
+        # x[7]  = total quote volume
+        # ----------------------------------------------------
+
+        buy_volume = sum(
+            float(x[10])
+            for x in closed_1m[-5:]
+        )
+
+        total_volume = sum(
+            float(x[7])
+            for x in closed_1m[-5:]
+        )
+
+        buyer_percent = (
+            buy_volume
+            /
+            total_volume
+            *
+            100
+            if total_volume
+            else 50
+        )
+
+
+        # ----------------------------------------------------
+        # EMA
+        # ----------------------------------------------------
+
+        ema9 = ema(
+            close,
+            9
+        )
+
+        ema21 = ema(
+            close,
+            21
+        )
+
+        ema50 = ema(
+            close,
+            50
+        )
+
+        ema9_previous = ema(
+            close[:-3],
+            9
+        )
+
+        ema21_previous = ema(
+            close[:-3],
+            21
+        )
+
+        ema_up = (
+            ema9 > ema21
+            and
+            ema9 > ema9_previous
+        )
+
+        ema_cross = (
+            ema9 > ema21
+            and
+            ema9_previous <= ema21_previous
+        )
+
+
+        # ----------------------------------------------------
+        # RSI
+        # ----------------------------------------------------
+
+        current_rsi = rsi(
+            close
+        )
+
+        previous_rsi = rsi(
+            close[:-3]
+        )
+
+
+        # ----------------------------------------------------
+        # MACD
+        # ----------------------------------------------------
+
+        _, _, macd_histogram = macd(
+            close
+        )
+
+        _, _, previous_macd_histogram = macd(
+            close[:-3]
+        )
+
+
+        # ----------------------------------------------------
+        # ADX
+        # ----------------------------------------------------
+
+        adx_value, plus_di, minus_di = adx(
+            high,
+            low,
+            close
+        )
+
+
+        # ----------------------------------------------------
+        # BOLLINGER
+        # ----------------------------------------------------
+
+        lower, middle, upper = bb(
+            close
+        )
+
+        width = (
+            (upper - lower)
+            /
+            middle
+            *
+            100
+            if middle
+            else 0
+        )
+
+        old_lower, old_middle, old_upper = bb(
+            close[:-5]
+        )
+
+        old_width = (
+            (old_upper - old_lower)
+            /
+            old_middle
+            *
+            100
+            if old_middle
+            else width
+        )
+
+        squeeze = (
+            width <= 2.2
+            or
+            (
+                old_width > 0
+                and
+                width < old_width * 0.80
+            )
+        )
+
+        expanding = (
+            old_width > 0
+            and
+            width > old_width * 1.08
+            )

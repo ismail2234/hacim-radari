@@ -1280,3 +1280,773 @@ def shortlist(items):
         key=ranking,
         reverse=True
     )[:SHORTLIST]
+def analyze(item):
+
+    symbol = item["symbol"]
+    price = item["price"]
+
+    try:
+
+        # -------------------------------------------------
+        # UZUN VADELİ TREND
+        # -------------------------------------------------
+
+        trend = daily_trend(
+            symbol
+        )
+
+        long_term_ok = trend["ok"]
+
+        d30 = trend["d30"]
+        d90 = trend["d90"]
+
+        trend_penalty = (
+            long_term_penalty(
+                d30,
+                d90
+            )
+            if long_term_ok
+            else 0
+        )
+
+        trend_state = long_term_status(
+            d30,
+            d90,
+            long_term_ok
+        )
+
+
+        # -------------------------------------------------
+        # 5M
+        # -------------------------------------------------
+
+        k5 = klines(
+            symbol,
+            "5m",
+            80
+        )
+
+        if len(k5) < 40:
+
+            return {
+                "status": "PASS"
+            }
+
+        closed_5m = k5[:-1]
+
+        close5 = [
+            float(x[4])
+            for x in closed_5m
+        ]
+
+        volume5 = [
+            float(x[7])
+            for x in closed_5m
+        ]
+
+        average_5m_volume = avg(
+            volume5[-12:]
+        )
+
+        recent_5m_volume = avg(
+            volume5[-3:]
+        )
+
+        volume5_ratio = (
+            recent_5m_volume
+            /
+            average_5m_volume
+            if average_5m_volume
+            else 0
+        )
+
+        momentum_15m = pct(
+            close5[-4],
+            price
+        )
+
+        if (
+            momentum_15m < -3
+            and
+            volume5_ratio < 1.3
+        ):
+
+            return {
+                "status": "PASS"
+            }
+
+
+        # -------------------------------------------------
+        # 1M
+        # -------------------------------------------------
+
+        k1 = klines(
+            symbol,
+            "1m",
+            180
+        )
+
+        if len(k1) < 100:
+
+            return {
+                "status": "PASS"
+            }
+
+        closed_1m = k1[:-1]
+
+        close = [
+            float(x[4])
+            for x in closed_1m
+        ]
+
+        high = [
+            float(x[2])
+            for x in closed_1m
+        ]
+
+        low = [
+            float(x[3])
+            for x in closed_1m
+        ]
+
+        open_price = [
+            float(x[1])
+            for x in closed_1m
+        ]
+
+        volume = [
+            float(x[7])
+            for x in closed_1m
+        ]
+
+        if price <= 0:
+
+            price = close[-1]
+
+
+        momentum_1m = pct(
+            close[-2],
+            price
+        )
+
+        momentum_5m = pct(
+            close5[-2],
+            price
+        )
+
+
+        low_90 = min(
+            low[-90:]
+        )
+
+        high_90 = max(
+            high[-90:]
+        )
+
+        location = (
+            (
+                price - low_90
+            )
+            /
+            (
+                high_90 - low_90
+            )
+            *
+            100
+            if high_90 > low_90
+            else 50
+        )
+
+
+        average_volume = avg(
+            volume[-30:]
+        )
+
+        last_3_volume = avg(
+            volume[-3:]
+        )
+
+        previous_volume = avg(
+            volume[-10:-3]
+        )
+
+        volume_ratio = (
+            last_3_volume
+            /
+            average_volume
+            if average_volume
+            else 0
+        )
+
+        volume_impulse = (
+            last_3_volume
+            /
+            previous_volume
+            if previous_volume
+            else 1
+        )
+
+
+        buy_volume = sum(
+            float(x[10])
+            for x in closed_1m[-5:]
+        )
+
+        total_volume = sum(
+            float(x[7])
+            for x in closed_1m[-5:]
+        )
+
+        buyer_percent = (
+            buy_volume
+            /
+            total_volume
+            *
+            100
+            if total_volume
+            else 50
+        )
+
+
+        # -------------------------------------------------
+        # EMA
+        # -------------------------------------------------
+
+        ema9 = ema(
+            close,
+            9
+        )
+
+        ema21 = ema(
+            close,
+            21
+        )
+
+        ema50 = ema(
+            close,
+            50
+        )
+
+        ema9_previous = ema(
+            close[:-3],
+            9
+        )
+
+        ema21_previous = ema(
+            close[:-3],
+            21
+        )
+
+        ema_up = (
+            ema9 > ema21
+            and
+            ema9 > ema9_previous
+        )
+
+        ema_cross = (
+            ema9 > ema21
+            and
+            ema9_previous
+            <=
+            ema21_previous
+        )
+
+
+        # -------------------------------------------------
+        # RSI
+        # -------------------------------------------------
+
+        current_rsi = rsi(
+            close
+        )
+
+        previous_rsi = rsi(
+            close[:-3]
+        )
+
+
+        # -------------------------------------------------
+        # MACD
+        # -------------------------------------------------
+
+        _, _, macd_histogram = macd(
+            close
+        )
+
+        _, _, previous_macd_histogram = macd(
+            close[:-3]
+        )
+
+
+        # -------------------------------------------------
+        # ADX
+        # -------------------------------------------------
+
+        adx_value, plus_di, minus_di = adx(
+            high,
+            low,
+            close
+        )
+
+
+        # -------------------------------------------------
+        # BOLLINGER
+        # -------------------------------------------------
+
+        lower, middle, upper = bb(
+            close
+        )
+
+        width = (
+            (
+                upper - lower
+            )
+            /
+            middle
+            *
+            100
+            if middle
+            else 0
+        )
+
+        old_lower, old_middle, old_upper = bb(
+            close[:-5]
+        )
+
+        old_width = (
+            (
+                old_upper
+                -
+                old_lower
+            )
+            /
+            old_middle
+            *
+            100
+            if old_middle
+            else width
+        )
+
+        squeeze = (
+            width <= 2.2
+            or
+            (
+                old_width > 0
+                and
+                width
+                <
+                old_width * 0.80
+            )
+        )
+
+        expanding = (
+            old_width > 0
+            and
+            width
+            >
+            old_width * 1.08
+        )
+
+
+        # -------------------------------------------------
+        # DİRENÇ / KIRILIM
+        # -------------------------------------------------
+
+        resistance = max(
+            high[-30:-2]
+        )
+
+        distance_to_resistance = max(
+            0,
+            (
+                resistance
+                -
+                price
+            )
+            /
+            price
+            *
+            100
+        )
+
+        breakout = (
+            price > resistance
+        )
+
+        closed_breakout = (
+            close[-1]
+            >
+            resistance
+        )
+
+        near_resistance = (
+            distance_to_resistance
+            <=
+            0.35
+        )
+
+
+        # -------------------------------------------------
+        # SON MUM
+        # -------------------------------------------------
+
+        candle_range = (
+            high[-1]
+            -
+            low[-1]
+        )
+
+        close_position = (
+            (
+                close[-1]
+                -
+                low[-1]
+            )
+            /
+            candle_range
+            *
+            100
+            if candle_range > 0
+            else 50
+        )
+
+
+        higher_low = (
+            low[-1] > low[-3]
+            and
+            low[-3] >= low[-6]
+        )
+
+
+        # -------------------------------------------------
+        # SETUP
+        # -------------------------------------------------
+
+        setup = 0
+
+
+        if ema_up:
+            setup += 12
+
+        if ema_cross:
+            setup += 6
+
+        if squeeze:
+            setup += 8
+
+        if higher_low:
+            setup += 6
+
+        if (
+            35 <= current_rsi <= 65
+            and
+            current_rsi
+            >
+            previous_rsi
+        ):
+            setup += 8
+
+        if price >= ema50:
+            setup += 5
+
+        if (
+            near_resistance
+            or
+            distance_to_resistance
+            <= 0.70
+        ):
+            setup += 8
+
+        if volume_ratio >= 1.5:
+            setup += 8
+
+        if buyer_percent >= 58:
+            setup += 5
+
+
+        # -------------------------------------------------
+        # CONFIRMATION
+        # -------------------------------------------------
+
+        confirmation = 0
+
+
+        if closed_breakout:
+
+            confirmation += 18
+
+        elif breakout:
+
+            confirmation += 14
+
+
+        if volume_ratio >= 2.0:
+
+            confirmation += 12
+
+        elif volume_ratio >= 1.5:
+
+            confirmation += 7
+
+
+        if volume5_ratio >= 1.5:
+
+            confirmation += 8
+
+
+        if buyer_percent >= 65:
+
+            confirmation += 7
+
+
+        if (
+            macd_histogram
+            >
+            previous_macd_histogram
+        ):
+
+            confirmation += 6
+
+
+        if (
+            plus_di > minus_di
+            and
+            adx_value >= 18
+        ):
+
+            confirmation += 7
+
+
+        if close_position >= 65:
+
+            confirmation += 4
+
+
+        if expanding:
+
+            confirmation += 4
+
+
+        # -------------------------------------------------
+        # KISA VADELİ RİSK
+        # -------------------------------------------------
+
+        penalty = 0
+
+
+        if momentum_1m > 2.5:
+
+            penalty -= 10
+
+
+        if momentum_5m > 5:
+
+            penalty -= 12
+
+
+        if current_rsi > 78:
+
+            penalty -= 10
+
+
+        if (
+            buyer_percent < 50
+            and
+            volume_ratio >= 1.8
+        ):
+
+            penalty -= 8
+
+
+        if (
+            momentum_5m < -1.2
+            and
+            not higher_low
+        ):
+
+            penalty -= 12
+
+
+        # -------------------------------------------------
+        # UZUN VADELİ DÜŞÜŞ CEZASI
+        # -------------------------------------------------
+
+        penalty += trend_penalty
+
+
+        # -------------------------------------------------
+        # TOPLAM SKOR
+        # -------------------------------------------------
+
+        score = clamp(
+            setup
+            +
+            confirmation
+            +
+            penalty
+        )
+
+
+        # -------------------------------------------------
+        # STAGE
+        # -------------------------------------------------
+
+        stage = "NONE"
+
+
+        if setup >= 25:
+
+            stage = "SETUP"
+
+
+        if (
+            score >= 68
+            and
+            confirmation >= 18
+        ):
+
+            stage = "CONFIRMED"
+
+
+        # Sert uzun vadeli düşüşte VERY'yi
+        # otomatik olarak vermiyoruz.
+        #
+        # Böylece SOPH gibi:
+        # 90d -50% / -65%
+        # coinler kısa vadeli patlama yaşasa bile
+        # doğrudan ÇOK GÜÇLÜ AL olamıyor.
+
+        very_long_term_ok = (
+            not long_term_ok
+            or
+            (
+                d30 > LT30_STRONG
+                and
+                d90 > LT90_STRONG
+            )
+        )
+
+
+        if (
+            score >= 84
+            and
+            confirmation >= 28
+            and
+            volume_ratio >= 1.5
+            and
+            very_long_term_ok
+        ):
+
+            stage = "VERY"
+
+
+        if stage == "CONFIRMED":
+
+            level = "BUY"
+
+        elif stage == "VERY":
+
+            level = "VERY"
+
+        elif stage == "SETUP":
+
+            level = "INTERNAL"
+
+        else:
+
+            level = "PASS"
+
+
+        DBS.put(
+            symbol,
+            score,
+            level,
+            stage
+        )
+
+
+        if level not in (
+            "BUY",
+            "VERY"
+        ):
+
+            return {
+                "status": "PASS",
+                "score": score
+            }
+
+
+        return {
+
+            "status": level,
+
+            "symbol": symbol,
+
+            "score": score,
+
+            "setup": setup,
+
+            "confirmation": confirmation,
+
+            "penalty": penalty,
+
+            "price": price,
+
+            "chg": item["chg"],
+
+            "loc": location,
+
+            "bp": buyer_percent,
+
+            "vr": volume_ratio,
+
+            "vr5": volume5_ratio,
+
+            "impulse": volume_impulse,
+
+            "rv": current_rsi,
+
+            "ad": adx_value,
+
+            "dist": distance_to_resistance,
+
+            "ema": ema_up,
+
+            "macd": (
+                macd_histogram
+                >
+                previous_macd_histogram
+            ),
+
+            "squeeze": squeeze,
+
+            "hl": higher_low,
+
+            "breakout": breakout,
+
+            "d30": d30,
+
+            "d90": d90,
+
+            "trend_penalty":
+                trend_penalty,
+
+            "trend_state":
+                trend_state,
+
+            "long_term_ok":
+                long_term_ok
+        }
+
+
+    except Exception as e:
+
+        log.debug(
+            "%s: %s",
+            symbol,
+            e
+        )
+
+        return {
+            "status": "error"
+    }

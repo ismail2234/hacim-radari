@@ -1953,3 +1953,26 @@ def loop():
                     elapsed
                 )
         )
+# ============================================================
+# THREAD + SERVER
+# ============================================================
+
+Thread(
+    target=loop,
+    daemon=True,
+    name="balina-v21"
+).start()
+
+
+if __name__ == "__main__":
+
+    app.run(
+        host="0.0.0.0",
+        port=int(
+            os.getenv(
+                "PORT",
+                "8080"
+            )
+        ),
+        use_reloader=False
+)

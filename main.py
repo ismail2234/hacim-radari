@@ -266,3 +266,223 @@ def adx(h,l,c,n=14):
     )
 
     return dx,pdi,mdi
+class DB:
+    def __init__(self,path):
+        self.path=path
+        self.lock=Lock()
+
+        with sqlite3.connect(path) as d:
+            d.execute("""
+                CREATE TABLE IF NOT EXISTS state(
+                    symbol TEXT PRIMARY KEY,
+                    stage INTEGER,
+                    score REAL,
+                    updated REAL
+                )
+            """)
+
+            d.execute("""
+                CREATE TABLE IF NOT EXISTS alerts(
+                    symbol TEXT PRIMARY KEY,
+                    level TEXT,
+                    score REAL,
+                    sent REAL
+                )
+            """)
+
+            d.execute("""
+                CREATE TABLE IF NOT EXISTS oi(
+                    symbol TEXT PRIMARY KEY,
+                    value REAL,
+                    ts REAL
+                )
+            """)
+
+
+    def state(self,s):
+        with self.lock,sqlite3.connect(self.path) as d:
+            return d.execute(
+                "SELECT stage,score,updated FROM state WHERE symbol=?",
+                (s,)
+            ).fetchone()
+
+
+    def save_state(self,s,stage,score):
+        with self.lock,sqlite3.connect(self.path) as d:
+            d.execute("""
+                INSERT INTO state VALUES(?,?,?,?)
+                ON CONFLICT(symbol) DO UPDATE SET
+                    stage=excluded.stage,
+                    score=excluded.score,
+                    updated=excluded.updated
+            """,(
+                s,
+                stage,
+                score,
+                time.time()
+            ))
+
+
+    def alert(self,s):
+        with self.lock,sqlite3.connect(self.path) as d:
+            return d.execute(
+                "SELECT level,score,sent FROM alerts WHERE symbol=?",
+                (s,)
+            ).fetchone()
+
+
+    def can_send(self,s,level):
+        old=self.alert(s)
+
+        if not old:
+            return True
+
+        old_level,_,sent=old
+
+        rank={
+            "AL":1,
+            "VERY":2
+        }
+
+        if rank.get(level,0)>rank.get(old_level,0):
+            return True
+
+        return (
+            time.time()-sent>=COOLDOWN
+        )
+
+
+    def mark_alert(self,s,level,score):
+        with self.lock,sqlite3.connect(self.path) as d:
+            d.execute("""
+                INSERT INTO alerts
+                VALUES(?,?,?,?)
+                ON CONFLICT(symbol) DO UPDATE SET
+                    level=excluded.level,
+                    score=excluded.score,
+                    sent=excluded.sent
+            """,(
+                s,
+                level,
+                score,
+                time.time()
+            ))
+
+
+    def get_oi(self,s):
+        with self.lock,sqlite3.connect(self.path) as d:
+            r=d.execute(
+                "SELECT value,ts FROM oi WHERE symbol=?",
+                (s,)
+            ).fetchone()
+
+        if not r:
+            return None
+
+        if time.time()-r[1]>SCAN_INTERVAL*5:
+            return None
+
+        return float(r[0])
+
+
+    def put_oi(self,s,v):
+        if v is None:
+            return
+
+        with self.lock,sqlite3.connect(self.path) as d:
+            d.execute("""
+                INSERT INTO oi VALUES(?,?,?)
+                ON CONFLICT(symbol) DO UPDATE SET
+                    value=excluded.value,
+                    ts=excluded.ts
+            """,(
+                s,
+                v,
+                time.time()
+            ))
+
+
+DBS=DB(DB_PATH)
+
+
+SYMBOLS=set()
+
+
+def refresh_symbols(info):
+    global SYMBOLS
+
+    symbols=set()
+
+    for x in info.get("symbols",[]):
+        try:
+            if x.get("status")!="TRADING":
+                continue
+
+            s=x.get("symbol","")
+            base=x.get("baseAsset","")
+            quote=x.get("quoteAsset","")
+
+            if quote not in ("TRY","USDT"):
+                continue
+
+            if base in EXCLUDED:
+                continue
+
+            if any(
+                base.endswith(z)
+                for z in ("UP","DOWN","BULL","BEAR")
+            ):
+                continue
+
+            symbols.add(s)
+
+        except Exception:
+            continue
+
+    SYMBOLS=symbols
+
+    return symbols
+
+
+def candidate_symbols(tickers):
+    out=[]
+
+    for x in tickers:
+        s=x.get("symbol","")
+
+        if s not in SYMBOLS:
+            continue
+
+        try:
+            qv=float(x.get("quoteVolume",0))
+
+            quote="TRY" if s.endswith("TRY") else "USDT"
+
+            minimum=(
+                MIN_TR_VOLUME
+                if quote=="TRY"
+                else MIN_USDT_VOLUME
+            )
+
+            if qv<minimum:
+                continue
+
+            out.append(s)
+
+        except (TypeError,ValueError):
+            continue
+
+    return out
+
+
+def symbol_quote(s):
+    if s.endswith("TRY"):
+        return "TRY"
+    if s.endswith("USDT"):
+        return "USDT"
+    return ""
+
+
+def futures_symbol(s):
+    base=s[:-3] if s.endswith("TRY") else s[:-4]
+    return base+"USDT"

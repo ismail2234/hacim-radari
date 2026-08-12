@@ -1588,3 +1588,368 @@ def message(result):
             "🎯 Alım teyidi oluştu."
         )
         )
+# ============================================================
+# TARAMA
+# ============================================================
+
+def scan():
+
+    start = time.time()
+
+    data = tickers()
+
+    if not data:
+        return True
+
+
+    # --------------------------------------------------------
+    # TÜM TRY ADAYLARI
+    # --------------------------------------------------------
+
+    all_candidates = candidates(
+        data
+    )
+
+
+    # --------------------------------------------------------
+    # ÖN ELEME
+    #
+    # Önce hacim + günlük hareket üzerinden
+    # daha anlamlı adayları seçiyoruz.
+    #
+    # Böylece 400+ coin için aynı anda
+    # 1m + 5m istemiyoruz.
+    # --------------------------------------------------------
+
+    symbols = shortlist(
+        all_candidates
+    )
+
+
+    signals = []
+
+    stats = {}
+
+
+    # --------------------------------------------------------
+    # PARALEL ANALİZ
+    # --------------------------------------------------------
+
+    with ThreadPoolExecutor(
+        max_workers=WORKERS
+    ) as executor:
+
+        jobs = [
+            executor.submit(
+                analyze,
+                item
+            )
+            for item in symbols
+        ]
+
+
+        for job in as_completed(jobs):
+
+            result = job.result()
+
+            status = result.get(
+                "status",
+                "error"
+            )
+
+            stats[status] = (
+                stats.get(status, 0)
+                +
+                1
+            )
+
+
+            if status in (
+                "BUY",
+                "VERY"
+            ):
+
+                signals.append(
+                    result
+                )
+
+
+    # --------------------------------------------------------
+    # SIRALAMA
+    # --------------------------------------------------------
+
+    rank = {
+        "BUY": 1,
+        "VERY": 2
+    }
+
+
+    signals.sort(
+        key=lambda x: (
+            rank[x["status"]],
+            x["score"]
+        ),
+        reverse=True
+    )
+
+
+    # --------------------------------------------------------
+    # TELEGRAM
+    #
+    # SADECE AL / VERY
+    #
+    # INTERNAL / SETUP BURAYA HİÇ GELMEZ.
+    # --------------------------------------------------------
+
+    sent = 0
+
+
+    for result in signals[
+        :MAX_SIGNALS
+    ]:
+
+
+        if not DBS.can_send(
+            result["symbol"],
+            result["status"]
+        ):
+
+            continue
+
+
+        if telegram(
+            message(result)
+        ):
+
+            DBS.put(
+                result["symbol"],
+                result["score"],
+                result["status"],
+                result["status"],
+                sent=time.time()
+            )
+
+            sent += 1
+
+
+        time.sleep(
+            0.3
+        )
+
+
+    elapsed = (
+        time.time()
+        -
+        start
+    )
+
+
+    errors = stats.get(
+        "error",
+        0
+    )
+
+
+    log.info(
+        "V21 | TRY:%d/%d | AL:%d | "
+        "VERY:%d | Hata:%d | "
+        "Gonder:%d | %.1fs",
+
+        len(symbols),
+
+        len(all_candidates),
+
+        stats.get(
+            "BUY",
+            0
+        ),
+
+        stats.get(
+            "VERY",
+            0
+        ),
+
+        errors,
+
+        sent,
+
+        elapsed
+    )
+
+
+    # --------------------------------------------------------
+    # SİSTEM ÇOK YAVAŞLARSA
+    # veya çok fazla hata varsa
+    # sonraki turda backoff uygulanır.
+    # --------------------------------------------------------
+
+    return (
+        errors
+        /
+        max(
+            1,
+            len(symbols)
+        )
+        > 0.30
+        or
+        elapsed
+        >
+        SCAN_INTERVAL * 1.25
+    )
+
+
+# ============================================================
+# FLASK
+# ============================================================
+
+app = Flask(__name__)
+
+
+@app.route("/")
+def home():
+
+    return (
+        "🐋 Balina Radarı V21 Aktif"
+    )
+
+
+@app.route("/health")
+def health():
+
+    return {
+        "status": "ok",
+        "bot": "Balina Radarı V21",
+        "base": BASE,
+        "scan_interval": SCAN_INTERVAL
+    }
+
+
+# ============================================================
+# MARKET DOĞRULAMA
+# ============================================================
+
+def validate_market():
+
+    info = exchange_info()
+
+    symbols = {
+        item.get("symbol")
+        for item in info.get(
+            "symbols",
+            []
+        )
+    }
+
+
+    try_count = sum(
+        symbol.endswith("TRY")
+        for symbol in symbols
+        if symbol
+    )
+
+
+    if try_count <= 0:
+
+        raise RuntimeError(
+            f"BASE {BASE} üzerinde "
+            "TRY marketi bulunamadı. "
+            "BINANCE_TR_BASE kontrol edilmeli."
+        )
+
+
+    log.info(
+        "V21 | Binance TR market "
+        "doğrulandı | TRY:%d",
+        try_count
+    )
+
+
+# ============================================================
+# ANA DÖNGÜ
+# ============================================================
+
+def loop():
+
+    log.info(
+        "🐋 BALİNA RADARI V21 "
+        "başlatılıyor..."
+    )
+
+
+    # --------------------------------------------------------
+    # EN ÖNEMLİ KONTROL:
+    #
+    # API gerçekten TRY marketi veriyor mu?
+    #
+    # Vermiyorsa sistem sessizce yanlış marketi taramaz.
+    # --------------------------------------------------------
+
+    try:
+
+        validate_market()
+
+    except Exception as e:
+
+        log.exception(
+            "MARKET DOĞRULAMA HATASI: %s",
+            e
+        )
+
+        return
+
+
+    # Başlangıç bildirimi.
+    # Bu bir sinyal değildir.
+
+    if TOKEN and CHAT:
+
+        telegram(
+            "🐋 BALİNA RADARI V21 AKTİF\n"
+            "🟢 AL → 🔥 ÇOK GÜÇLÜ AL"
+        )
+
+
+    while True:
+
+        started = time.time()
+
+
+        try:
+
+            backoff = scan()
+
+        except Exception:
+
+            log.exception(
+                "Tarama döngüsü hatası"
+            )
+
+            backoff = True
+
+
+        elapsed = (
+            time.time()
+            -
+            started
+        )
+
+
+        if backoff:
+
+            time.sleep(
+                max(
+                    180,
+                    SCAN_INTERVAL * 3
+                )
+            )
+
+        else:
+
+            time.sleep(
+                max(
+                    1,
+                    SCAN_INTERVAL
+                    -
+                    elapsed
+                )
+        )

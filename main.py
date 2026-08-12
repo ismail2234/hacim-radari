@@ -580,3 +580,756 @@ def candidates(st, ft):
             continue
 
     return out
+# =========================
+# ANA ANALİZ
+# =========================
+
+def analyze(symbol):
+
+    try:
+
+        # Daha geniş veri:
+        # ani hareketleri yakalamak için
+        # 1m + 5m birlikte kullanılıyor.
+        sp = klines(
+            SPOT,
+            symbol,
+            "1m",
+            180
+        )
+
+        fu = klines(
+            FUT,
+            symbol,
+            "1m",
+            90
+        )
+
+        sp5 = klines(
+            SPOT,
+            symbol,
+            "5m",
+            48
+        )
+
+        if (
+            len(sp) < 90
+            or len(fu) < 50
+            or len(sp5) < 25
+        ):
+            return {
+                "status": "PASS"
+            }
+
+
+        # Son mum canlı olabilir.
+        live = sp[-1]
+
+        price = float(live[4])
+
+
+        # Tamamlanmış mumlar
+        c = [
+            float(x[4])
+            for x in sp[:-1]
+        ]
+
+        h = [
+            float(x[2])
+            for x in sp[:-1]
+        ]
+
+        l = [
+            float(x[3])
+            for x in sp[:-1]
+        ]
+
+        o = [
+            float(x[1])
+            for x in sp[:-1]
+        ]
+
+
+        c5 = [
+            float(x[4])
+            for x in sp5[:-1]
+        ]
+
+
+        # =========================
+        # FİYAT MOMENTUMU
+        # =========================
+
+        m1 = pct(
+            c[-2],
+            price
+        )
+
+        m5 = pct(
+            c5[-2],
+            price
+        )
+
+        m15 = pct(
+            c5[-4],
+            price
+        )
+
+
+        # =========================
+        # SON 60 DAKİKALIK KONUM
+        # =========================
+
+        lo = min(l[-60:])
+        hi = max(h[-60:])
+
+        loc = (
+            (price - lo) /
+            (hi - lo) * 100
+            if hi > lo
+            else 50
+        )
+
+
+        # Dip artık sadece hazırlık puanı.
+        # AL için zorunlu değil.
+
+        prep = 0
+
+        if loc <= 25:
+            prep += 8
+
+        elif loc <= 40:
+            prep += 5
+
+
+        # =========================
+        # HACİM
+        # =========================
+
+        sv = [
+            float(x[7])
+            for x in sp[:-1]
+        ]
+
+        fv = [
+            float(x[7])
+            for x in fu[:-1]
+        ]
+
+        tv = [
+            float(x[8])
+            for x in sp[:-1]
+        ]
+
+
+        avs = avg(sv[-36:])
+        avf = avg(fv[-36:])
+        avt = avg(tv[-36:])
+
+
+        if min(avs, avf, avt) <= 0:
+            return {
+                "status": "PASS"
+            }
+
+
+        sr = (
+            avg(sv[-3:]) /
+            avs
+        )
+
+        fr = (
+            avg(fv[-3:]) /
+            avf
+        )
+
+        trr = (
+            avg(tv[-3:]) /
+            avt
+        )
+
+
+        # Son 3 dakikanın,
+        # ondan önceki 3 dakikaya göre ivmesi.
+        prevv = avg(sv[-6:-3])
+
+        imp = (
+            avg(sv[-3:]) / prevv
+            if prevv > 0
+            else 1
+        )
+
+
+        # Taker buy quote volume
+        buy = sum(
+            float(x[10])
+            for x in sp[-4:]
+        )
+
+        total = sum(
+            float(x[7])
+            for x in sp[-4:]
+        )
+
+        bp = (
+            buy / total * 100
+            if total > 0
+            else 50
+        )
+
+
+        # Spot öncülüğü
+        spot_lead = (
+            sr >= 1.25
+            and sr >= fr * 1.10
+        )
+
+
+        # =========================
+        # PARA PUANI
+        # =========================
+
+        money = 0
+
+        if sr >= 2.8:
+            money += 11
+
+        elif sr >= 2.0:
+            money += 8
+
+        elif sr >= 1.5:
+            money += 6
+
+        elif sr >= 1.25:
+            money += 3
+
+
+        if fr >= 2.2:
+            money += 6
+
+        elif fr >= 1.5:
+            money += 4
+
+        elif fr >= 1.2:
+            money += 2
+
+
+        if trr >= 2.0:
+            money += 5
+
+        elif trr >= 1.5:
+            money += 3
+
+
+        if bp >= 72:
+            money += 6
+
+        elif bp >= 65:
+            money += 4
+
+        elif bp >= 60:
+            money += 2
+
+
+        if spot_lead:
+            money += 3
+
+
+        # =========================
+        # EMA
+        # =========================
+
+        e9 = ema(c, 9)
+        e21 = ema(c, 21)
+        e50 = ema(c, 50)
+
+
+        e9p = ema(c[:-3], 9)
+        e21p = ema(c[:-3], 21)
+
+
+        ema_up = e9 > e21
+
+        ema_accel = e9 > e9p
+
+        ema_turn = (
+            e9 > e9p
+            and e9p <= e21p
+        )
+
+
+        # =========================
+        # RSI
+        # =========================
+
+        rv = rsi(c)
+
+        rvp = rsi(c[:-3])
+
+        rsi_up = rv > rvp
+
+
+        # =========================
+        # MACD
+        # =========================
+
+        mm, ms, mh = macd(c)
+
+        pm, ps, ph = macd(c[:-3])
+
+        macd_up = mh > ph
+
+        macd_bull = mm > ms
+
+
+        # =========================
+        # ADX
+        # =========================
+
+        ad, di, mdi = adx(
+            h,
+            l,
+            c
+        )
+
+        trend_power = (
+            ad >= 18
+            and di > mdi
+        )
+
+
+        # =========================
+        # MOMENTUM PUANI
+        # =========================
+
+        momentum = 0
+
+        if ema_up:
+            momentum += 4
+
+        if ema_accel:
+            momentum += 3
+
+        if ema_turn:
+            momentum += 2
+
+        if rsi_up:
+
+            if 40 <= rv <= 65:
+                momentum += 4
+
+            elif 35 <= rv <= 70:
+                momentum += 2
+
+
+        if macd_up:
+            momentum += 4
+
+        if macd_bull:
+            momentum += 3
+
+        if trend_power:
+            momentum += 4
+
+        if price >= e50:
+            momentum += 2
+
+
+        # =========================
+        # BOLLINGER
+        # =========================
+
+        bl, bm, bu = bb(c)
+
+        width = (
+            (bu - bl) /
+            bm * 100
+            if bm
+            else 0
+        )
+
+
+        old_l, old_m, old_u = bb(
+            c[:-5]
+        )
+
+        old_width = (
+            (old_u - old_l) /
+            old_m * 100
+            if old_m
+            else width
+        )
+
+
+        squeeze = (
+            width <= 1.8
+            or width < old_width * 0.82
+        )
+
+
+        expanding = (
+            width > old_width * 1.05
+            if old_width
+            else False
+        )
+
+
+        # =========================
+        # KIRILIM
+        # =========================
+
+        recent_high = max(h[-20:])
+
+        dist = max(
+            0,
+            (recent_high - price) /
+            price * 100
+        )
+
+
+        breakout = 0
+
+
+        # Dirence yaklaşma
+        if dist <= 0.10:
+            breakout += 10
+
+        elif dist <= 0.25:
+            breakout += 8
+
+        elif dist <= 0.50:
+            breakout += 5
+
+        elif dist <= 0.80:
+            breakout += 2
+
+
+        if squeeze:
+            breakout += 4
+
+
+        if expanding and imp >= 1.25:
+            breakout += 4
+
+
+        # Higher-Low
+        higher_low = (
+            l[-1] > l[-3]
+            and l[-3] >= l[-6]
+        )
+
+        if higher_low:
+            breakout += 4
+
+
+        # Son mum güçlü kapanışa yakın mı?
+        candle_range = (
+            h[-1] - l[-1]
+        )
+
+        close_position = (
+            (c[-1] - l[-1]) /
+            candle_range
+            if candle_range > 0
+            else 0.5
+        )
+
+
+        if close_position >= 0.75:
+            breakout += 3
+
+
+        # =========================
+        # RİSK
+        # =========================
+
+        risk = 0
+
+        falling = (
+            m5 < -0.8
+            and m15 < -1.2
+            and not higher_low
+        )
+
+
+        if falling:
+            risk -= 15
+
+
+        # Aşırı alım
+        if rv > 78:
+            risk -= 8
+
+        elif rv > 72:
+            risk -= 4
+
+
+        # Ani pump'ın tepesinden kovalamayı azalt
+        if m5 > 3.0:
+            risk -= 8
+
+        elif m5 > 2.0:
+            risk -= 4
+
+
+        # Alıcı baskısı zayıfsa
+        if bp < 55 and sr >= 1.5:
+            risk -= 10
+
+
+        # Hacim yok ama fiyat uçmuşsa
+        if imp < 0.75 and m5 > 1:
+            risk -= 6
+
+
+        # =========================
+        # TOPLAM SKOR
+        # =========================
+
+        score = clamp(
+            prep +
+            money +
+            momentum +
+            breakout +
+            risk
+        )
+
+
+        # =========================
+        # İÇ HAFIZA
+        # =========================
+
+        previous_memory = remember(
+            symbol,
+            score
+        )
+
+
+        if previous_memory:
+
+            old_score = previous_memory["score"]
+
+            # Coin güçleniyorsa küçük bonus
+            if score >= old_score + 5:
+                score = clamp(score + 4)
+
+
+        # =========================
+        # OI
+        # =========================
+
+        oi_change = None
+
+        if score >= 70:
+
+            now_oi = oi(symbol)
+
+            old_oi = DBS.getoi(symbol)
+
+            if (
+                old_oi is not None
+                and now_oi is not None
+            ):
+
+                oi_change = pct(
+                    old_oi,
+                    now_oi
+                )
+
+                if oi_change >= 0.7:
+                    score = clamp(score + 3)
+
+                elif oi_change <= -1.5:
+                    score = clamp(score - 3)
+
+
+            DBS.putoi(
+                symbol,
+                now_oi
+            )
+
+
+        # =========================
+        # AL KOŞULLARI
+        # =========================
+
+        # DİKKAT:
+        # Burada artık dip şartı yok.
+
+        buy = (
+            score >= 78
+            and money >= 14
+            and momentum >= 12
+            and breakout >= 9
+            and sr >= 1.25
+            and bp >= 58
+            and not falling
+            and not (
+                rv > 78
+                and m5 > 2.5
+            )
+        )
+
+
+        # =========================
+        # ÇOK GÜÇLÜ AL
+        # =========================
+
+        very = (
+            score >= 90
+            and money >= 18
+            and momentum >= 16
+            and breakout >= 14
+            and sr >= 1.5
+            and bp >= 62
+            and imp >= 1.15
+            and not falling
+            and rv < 78
+        )
+
+
+        if very:
+            level = "VERY"
+
+        elif buy:
+            level = "AL"
+
+        else:
+            # Hazırlık aşamaları burada kalıyor.
+            # Telegram'a GÖNDERİLMEYECEK.
+            level = "PASS"
+
+
+        if level == "PASS":
+
+            return {
+                "status": "PASS",
+                "score": score
+            }
+
+
+        # =========================
+        # SONUÇ
+        # =========================
+
+        reasons = []
+
+        if sr >= 1.5:
+            reasons.append(
+                f"Spot {sr:.2f}x"
+            )
+
+        elif sr >= 1.25:
+            reasons.append(
+                f"Spot {sr:.2f}x"
+            )
+
+
+        if bp >= 65:
+            reasons.append(
+                f"Alıcı %{bp:.0f}"
+            )
+
+        elif bp >= 60:
+            reasons.append(
+                f"Alıcı %{bp:.0f}"
+            )
+
+
+        if ema_up:
+            reasons.append(
+                "EMA9>21"
+            )
+
+
+        if rsi_up and 35 < rv < 70:
+            reasons.append(
+                f"RSI {rv:.0f}↑"
+            )
+
+
+        if macd_up:
+            reasons.append(
+                "MACD güçleniyor"
+            )
+
+
+        if macd_bull:
+            reasons.append(
+                "MACD pozitif"
+            )
+
+
+        if ad >= 20 and di > mdi:
+            reasons.append(
+                f"ADX {ad:.0f}"
+            )
+
+
+        if squeeze:
+            reasons.append(
+                "BB sıkışma"
+            )
+
+
+        if dist <= 0.5:
+            reasons.append(
+                f"Direnç %{dist:.2f}"
+            )
+
+
+        if higher_low:
+            reasons.append(
+                "Higher-Low"
+            )
+
+
+        if imp >= 1.3:
+            reasons.append(
+                f"Hacim {imp:.2f}x"
+            )
+
+
+        if oi_change is not None and oi_change >= 0.7:
+            reasons.append(
+                f"OI +{oi_change:.2f}%"
+            )
+
+
+        return {
+            "status": level,
+            "symbol": symbol,
+            "score": score,
+            "price": price,
+            "loc": loc,
+            "bp": bp,
+            "sr": sr,
+            "fr": fr,
+            "trr": trr,
+            "rv": rv,
+            "ema_up": ema_up,
+            "macd_up": macd_up,
+            "macd_bull": macd_bull,
+            "squeeze": squeeze,
+            "dist": dist,
+            "imp": imp,
+            "higher_low": higher_low,
+            "spot_lead": spot_lead,
+            "adx": ad,
+            "oi": oi_change,
+            "reasons": reasons
+        }
+
+
+    except Exception as e:
+
+        log.debug(
+            "%s: %s",
+            symbol,
+            e
+        )
+
+        return {
+            "status": "error"
+        }

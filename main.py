@@ -357,3 +357,467 @@ def candidates(st,ft):
             continue
 
     return out
+# 3/5
+def analyze(s):
+    try:
+        sp=klines(SPOT,s,"1m",180)
+        sp5=klines(SPOT,s,"5m",80)
+        sp15=klines(SPOT,s,"15m",40)
+        fu=klines(FUT,s,"1m",80)
+
+        if (
+            len(sp)<100 or
+            len(sp5)<35 or
+            len(sp15)<25 or
+            len(fu)<40
+        ):
+            return {"status":"PASS"}
+
+        # Son mum kapanmadığı için indikatörleri kapalı mumlardan hesapla.
+        price=float(sp[-1][4])
+
+        c=[float(x[4]) for x in sp[:-1]]
+        h=[float(x[2]) for x in sp[:-1]]
+        l=[float(x[3]) for x in sp[:-1]]
+        o=[float(x[1]) for x in sp[:-1]]
+        v=[float(x[7]) for x in sp[:-1]]
+        tb=[float(x[11]) for x in sp[:-1]]
+
+        c5=[float(x[4]) for x in sp5[:-1]]
+        v5=[float(x[7]) for x in sp5[:-1]]
+
+        c15=[float(x[4]) for x in sp15[:-1]]
+
+        if len(c)<80 or len(c5)<25:
+            return {"status":"PASS"}
+
+        # Kısa momentum
+        m1=pct(c[-2],price)
+        m5=pct(c5[-2],price)
+        m15=pct(c15[-2],price)
+
+        # Aşırı hızlı mum kovalamayı engelle.
+        if m1>2.0 or m5>4.0:
+            return {"status":"PASS"}
+
+        # EMA trend
+        e9=ema(c,9)
+        e21=ema(c,21)
+        e50=ema(c,50)
+        e99=ema(c,99)
+
+        e9p=ema(c[:-3],9)
+        e21p=ema(c[:-3],21)
+
+        ema_bull=e9>e21
+        ema_stack=e9>e21>e50
+        ema_trend=price>e21 and price>e50
+        ema_turn=e9>e9p and e9p>=e21p
+
+        # RSI
+        rv=rsi(c,14)
+        rv6=rsi(c,6)
+        rvp=rsi(c[:-3],14)
+
+        rsi_up=rv>rvp
+        rsi_ok=48<=rv<=70
+        rsi_strong=52<=rv<=68
+
+        # MACD
+        mm,ms,mh=macd(c)
+        pm,ps,ph=macd(c[:-3])
+
+        macd_up=mh>ph
+        macd_cross=mm>ms and pm<=ps
+        macd_positive=mm>0
+
+        # ADX / yön
+        ad,di,mdi=adx(h,l,c)
+        trend_power=ad>=17 and di>mdi
+
+        # Bollinger
+        bl,bm,bu=bb(c)
+        width=(bu-bl)/bm*100 if bm else 0
+
+        old_l,old_m,old_u=bb(c[:-8])
+        old_width=(
+            (old_u-old_l)/old_m*100
+            if old_m else width
+        )
+
+        squeeze=width<=2.4 or (
+            old_width>0 and width<old_width*.82
+        )
+
+        expanding=(
+            old_width>0 and
+            width>old_width*1.08
+        )
+
+        # Hacim
+        avg_v=avg(v[-30:])
+        avg_v5=avg(v5[-20:])
+
+        vol1=v[-1]/avg_v if avg_v>0 else 1
+        vol5=v5[-1]/avg_v5 if avg_v5>0 else 1
+
+        buy_quote=sum(tb[-3:])
+        quote=sum(v[-3:])
+        buy_pct=buy_quote/quote*100 if quote>0 else 50
+
+        # Son 20 mumun direnci.
+        recent_high=max(h[-20:])
+        recent_low=min(l[-20:])
+
+        dist=max(
+            0,
+            (recent_high-price)/price*100
+        )
+
+        # Canlı fiyat son direnci geçti mi?
+        breakout=price>recent_high*1.0005
+
+        # Kırılım sonrası hacim teyidi
+        volume_break=(
+            breakout and
+            (vol1>=1.35 or vol5>=1.25) and
+            buy_pct>=55
+        )
+
+        # Sıkışmadan çıkış
+        squeeze_break=(
+            squeeze and
+            price>=recent_high*.998 and
+            (vol1>=1.15 or vol5>=1.15)
+        )
+
+        # Yapı
+        higher_low=(
+            l[-1]>l[-3] and
+            l[-3]>=l[-6]
+        )
+
+        higher_high=(
+            h[-1]>=h[-4] and
+            c[-1]>=c[-4]
+        )
+
+        candle_body=abs(c[-1]-o[-1])
+        candle_range=max(h[-1]-l[-1],price*.0001)
+
+        strong_close=(
+            c[-1]>o[-1] and
+            candle_body/candle_range>=.45
+        )
+
+        # Dip artık ana şart değil.
+        # Güçlü trendde dip şartı sinyali öldürmemeli.
+        loc=(
+            (price-recent_low)/
+            (recent_high-recent_low)*100
+            if recent_high>recent_low else 50
+        )
+
+        near_support=loc<=45
+
+        # 15m trend
+        e15_9=ema(c15,9)
+        e15_21=ema(c15,21)
+        trend15=e15_9>=e15_21
+
+        # 1m hacim ivmesi
+        prev_v=avg(v[-7:-3])
+        volume_imp=(
+            avg(v[-3:])/prev_v
+            if prev_v>0 else 1
+        )
+
+        # OI
+        oi_change=None
+        oi_reason=""
+
+        if (
+            volume_break or
+            squeeze_break or
+            ema_stack
+        ):
+            now=oi(s)
+            old=DBS.getoi(s)
+
+            if old is not None and now is not None:
+                oi_change=pct(old,now)
+
+            DBS.putoi(s,now)
+
+        # =========================
+        # YENİ SKOR
+        # =========================
+        score=0
+
+        # Trend: 25 puan
+        if ema_bull:
+            score+=5
+
+        if ema_stack:
+            score+=7
+
+        if ema_trend:
+            score+=5
+
+        if trend15:
+            score+=4
+
+        if ema_turn:
+            score+=4
+
+        # Momentum: 20 puan
+        if rsi_ok:
+            score+=5
+
+        if rsi_strong:
+            score+=3
+
+        if rsi_up:
+            score+=3
+
+        if macd_up:
+            score+=5
+
+        if macd_cross:
+            score+=4
+
+        # Hacim / para: 25 puan
+        if vol1>=1.25:
+            score+=5
+        elif vol1>=1.10:
+            score+=3
+
+        if vol5>=1.30:
+            score+=5
+        elif vol5>=1.15:
+            score+=3
+
+        if buy_pct>=65:
+            score+=6
+        elif buy_pct>=58:
+            score+=4
+        elif buy_pct>=53:
+            score+=2
+
+        if volume_imp>=1.5:
+            score+=5
+        elif volume_imp>=1.25:
+            score+=3
+
+        # Kırılım / yapı: 25 puan
+        if breakout:
+            score+=10
+        elif dist<=.25:
+            score+=7
+        elif dist<=.60:
+            score+=4
+
+        if volume_break:
+            score+=8
+        elif squeeze_break:
+            score+=6
+
+        if higher_low:
+            score+=3
+
+        if higher_high:
+            score+=2
+
+        if strong_close:
+            score+=2
+
+        if squeeze:
+            score+=3
+
+        if expanding:
+            score+=2
+
+        # ADX
+        if trend_power:
+            score+=4
+        elif ad>=15:
+            score+=2
+
+        # OI
+        if oi_change is not None:
+            if oi_change>=.5:
+                score+=3
+                oi_reason="OI artıyor"
+            elif oi_change<=-1.5:
+                score-=3
+                oi_reason="OI düşüyor"
+
+        # Risk cezaları
+        if m5>2.5:
+            score-=7
+
+        if rv>75:
+            score-=6
+
+        if (
+            m5<-.8 and
+            m15<-1.0 and
+            not higher_low
+        ):
+            score-=10
+
+        if (
+            not ema_bull and
+            not breakout and
+            not squeeze_break
+        ):
+            score-=5
+
+        # Aşırı uzak direnç bölgesinde kovalamayı azalt.
+        if (
+            price>recent_high and
+            m1>1.2 and
+            vol1<1.1
+        ):
+            score-=5
+
+        score=clamp(score)
+
+        # Önceki sinyale göre güçlenme
+        prev=DBS.prev(s)
+
+        if prev and score>=float(prev[0])+5:
+            score=clamp(score+3)
+
+        # =========================
+        # SİNYAL SEVİYELERİ
+        # =========================
+
+        very=(
+            score>=88 and
+            ema_bull and
+            ema_trend and
+            rsi_strong and
+            macd_up and
+            (breakout or squeeze_break) and
+            (volume_break or vol5>=1.30) and
+            buy_pct>=58 and
+            not (m5>3.0)
+        )
+
+        buy=(
+            score>=78 and
+            ema_trend and
+            rsi_ok and
+            macd_up and
+            (
+                volume_break or
+                squeeze_break or
+                (
+                    dist<=.30 and
+                    vol5>=1.15
+                )
+            ) and
+            buy_pct>=55 and
+            not (m5>3.5)
+        )
+
+        watch=(
+            score>=68 and
+            (
+                dist<=.60 or
+                squeeze or
+                volume_imp>=1.25
+            ) and
+            (
+                ema_bull or
+                macd_up or
+                rsi_up
+            )
+        )
+
+        level=(
+            "VERY" if very else
+            "BUY" if buy else
+            "WATCH" if watch else
+            "PASS"
+        )
+
+        if level=="PASS":
+            return {"status":"PASS","score":score}
+
+        reasons=[]
+
+        if ema_stack:
+            reasons.append("EMA trend")
+
+        elif ema_bull:
+            reasons.append("EMA9>21")
+
+        if rsi_up and rsi_ok:
+            reasons.append(f"RSI {rv:.0f}↑")
+
+        if macd_up:
+            reasons.append("MACD↑")
+
+        if trend_power:
+            reasons.append(f"ADX {ad:.0f}")
+
+        if vol5>=1.15:
+            reasons.append(f"5m hacim {vol5:.1f}x")
+
+        if buy_pct>=58:
+            reasons.append(f"Alıcı %{buy_pct:.0f}")
+
+        if breakout:
+            reasons.append("Direnç kırıldı")
+
+        elif dist<=.30:
+            reasons.append(f"Direnç %{dist:.2f}")
+
+        if squeeze:
+            reasons.append("BB sıkışma")
+
+        if volume_break:
+            reasons.append("Hacimli kırılım")
+
+        if higher_low:
+            reasons.append("Higher-Low")
+
+        if oi_reason:
+            reasons.append(oi_reason)
+
+        return {
+            "status":level,
+            "symbol":s,
+            "score":score,
+            "price":price,
+            "loc":loc,
+            "bp":buy_pct,
+            "rv":rv,
+            "rv6":rv6,
+            "ema_bull":ema_bull,
+            "ema_stack":ema_stack,
+            "macd_up":macd_up,
+            "macd_positive":macd_positive,
+            "squeeze":squeeze,
+            "expanding":expanding,
+            "dist":dist,
+            "breakout":breakout,
+            "volume_break":volume_break,
+            "vol1":vol1,
+            "vol5":vol5,
+            "volume_imp":volume_imp,
+            "higher_low":higher_low,
+            "higher_high":higher_high,
+            "adx":ad,
+            "oi":oi_change,
+            "m1":m1,
+            "m5":m5,
+            "m15":m15,
+            "reasons":reasons
+        }
+
+    except Exception as e:
+        log.debug("%s: %s",s,e)
+        return {"status":"error"}

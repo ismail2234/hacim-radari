@@ -1550,3 +1550,121 @@ def scan():
         errors / total > 0.30
         or elapsed > SCAN_INTERVAL * 1.25
         )
+# =========================
+# WEB / HEALTH
+# =========================
+
+app = Flask(__name__)
+
+
+@app.route("/")
+def home():
+
+    return (
+        "🐋 BALİNA RADARI V19 AKTİF"
+    )
+
+
+@app.route("/health")
+def health():
+
+    return {
+        "status": "ok",
+        "bot": "Balina Radarı V19",
+        "scan_interval": SCAN_INTERVAL,
+        "telegram_levels": [
+            "AL",
+            "VERY"
+        ]
+    }
+
+
+# =========================
+# ANA DÖNGÜ
+# =========================
+
+def loop():
+
+    log.info(
+        "🐋 BALİNA RADARI V19 başlatılıyor..."
+    )
+
+
+    if TOKEN and CHAT:
+
+        telegram(
+            "🐋 BALİNA RADARI V19 AKTİF\n"
+            "🔇 Ara aşamalar Telegram'a gönderilmiyor.\n"
+            "🟢 AL → 🔥 ÇOK GÜÇLÜ AL"
+        )
+
+
+    while True:
+
+        started = time.time()
+
+
+        try:
+
+            backoff = scan()
+
+        except Exception:
+
+            log.exception(
+                "Tarama döngüsü hatası"
+            )
+
+            backoff = True
+
+
+        elapsed = (
+            time.time() - started
+        )
+
+
+        if backoff:
+
+            time.sleep(
+                max(
+                    180,
+                    SCAN_INTERVAL * 3
+                )
+            )
+
+        else:
+
+            time.sleep(
+                max(
+                    1,
+                    SCAN_INTERVAL - elapsed
+                )
+            )
+
+
+# =========================
+# THREAD
+# =========================
+
+Thread(
+    target=loop,
+    daemon=True,
+    name="balina-v19"
+).start()
+
+
+# =========================
+# FLASK
+# =========================
+
+if __name__ == "__main__":
+
+    app.run(
+        host="0.0.0.0",
+        port=int(
+            os.getenv(
+                "PORT",
+                "8080"
+            )
+        ),
+        use_reloader=False
+    )

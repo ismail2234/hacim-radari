@@ -1114,3 +1114,477 @@ def analyze(item):
             and
             width > old_width * 1.08
             )
+        # ----------------------------------------------------
+        # DİRENÇ / KIRILIM
+        # ----------------------------------------------------
+
+        resistance = max(
+            high[-30:-2]
+        )
+
+        distance_to_resistance = max(
+            0,
+            (
+                resistance - price
+            )
+            /
+            price
+            *
+            100
+        )
+
+        breakout = (
+            price > resistance
+        )
+
+        closed_breakout = (
+            close[-1] > resistance
+        )
+
+        near_resistance = (
+            distance_to_resistance <= 0.35
+        )
+
+
+        # Son mumun kapanış gücü.
+        candle_range = (
+            high[-1]
+            -
+            low[-1]
+        )
+
+        close_position = (
+            (
+                close[-1]
+                -
+                low[-1]
+            )
+            /
+            candle_range
+            *
+            100
+            if candle_range > 0
+            else 50
+        )
+
+
+        # ----------------------------------------------------
+        # HIGHER LOW
+        # ----------------------------------------------------
+
+        higher_low = (
+            low[-1] > low[-3]
+            and
+            low[-3] >= low[-6]
+        )
+
+
+        # ====================================================
+        # İÇ SİSTEM 1
+        #
+        # SETUP
+        #
+        # BUNUN TELEGRAM MESAJI YOK.
+        # ====================================================
+
+        setup = 0
+
+
+        if ema_up:
+            setup += 12
+
+        if ema_cross:
+            setup += 6
+
+        if squeeze:
+            setup += 8
+
+        if higher_low:
+            setup += 6
+
+        if (
+            35 <= current_rsi <= 65
+            and
+            current_rsi > previous_rsi
+        ):
+            setup += 8
+
+        if price >= ema50:
+            setup += 5
+
+        if (
+            near_resistance
+            or
+            distance_to_resistance <= 0.70
+        ):
+            setup += 8
+
+        if volume_ratio >= 1.5:
+            setup += 8
+
+        if buyer_percent >= 58:
+            setup += 5
+
+
+        # ====================================================
+        # İÇ SİSTEM 2
+        #
+        # CONFIRMATION
+        #
+        # BURADA ARTIK HAREKET GERÇEKLEŞİYOR MU
+        # DİYE KONTROL EDİYORUZ.
+        # ====================================================
+
+        confirmation = 0
+
+
+        if closed_breakout:
+            confirmation += 18
+
+        elif breakout:
+            confirmation += 14
+
+
+        if volume_ratio >= 2.0:
+            confirmation += 12
+
+        elif volume_ratio >= 1.5:
+            confirmation += 7
+
+
+        if volume5_ratio >= 1.5:
+            confirmation += 8
+
+
+        if buyer_percent >= 65:
+            confirmation += 7
+
+
+        if (
+            macd_histogram
+            >
+            previous_macd_histogram
+        ):
+            confirmation += 6
+
+
+        if (
+            plus_di > minus_di
+            and
+            adx_value >= 18
+        ):
+            confirmation += 7
+
+
+        if close_position >= 65:
+            confirmation += 4
+
+
+        if expanding:
+            confirmation += 4
+
+
+        # ====================================================
+        # RİSK / AŞIRI KAÇMA CEZASI
+        # ====================================================
+
+        penalty = 0
+
+
+        # Son dakikada zaten patlamışsa
+        # körlemesine kovalamıyoruz.
+
+        if momentum_1m > 2.5:
+            penalty -= 10
+
+
+        if momentum_5m > 5:
+            penalty -= 12
+
+
+        if current_rsi > 78:
+            penalty -= 10
+
+
+        if (
+            buyer_percent < 50
+            and
+            volume_ratio >= 1.8
+        ):
+            penalty -= 8
+
+
+        if (
+            momentum_5m < -1.2
+            and
+            not higher_low
+        ):
+            penalty -= 12
+
+
+        # ====================================================
+        # TOPLAM SKOR
+        # ====================================================
+
+        score = clamp(
+            setup
+            +
+            confirmation
+            +
+            penalty
+        )
+
+
+        # ====================================================
+        # İÇ AŞAMALAR
+        # ====================================================
+
+        stage = "NONE"
+
+
+        if setup >= 25:
+            stage = "SETUP"
+
+
+        if (
+            score >= 68
+            and
+            confirmation >= 18
+        ):
+            stage = "CONFIRMED"
+
+
+        if (
+            score >= 84
+            and
+            confirmation >= 28
+            and
+            volume_ratio >= 1.5
+        ):
+            stage = "VERY"
+
+
+        # ====================================================
+        # TELEGRAM SEVİYELERİ
+        #
+        # SETUP     -> MESAJ YOK
+        # CONFIRMED -> 🟢 AL
+        # VERY      -> 🔥 ÇOK GÜÇLÜ AL
+        # ====================================================
+
+        if stage == "CONFIRMED":
+
+            level = "BUY"
+
+        elif stage == "VERY":
+
+            level = "VERY"
+
+        elif stage == "SETUP":
+
+            level = "INTERNAL"
+
+        else:
+
+            level = "PASS"
+
+
+        # İç durumu DB'ye yaz.
+        DBS.put(
+            symbol,
+            score,
+            level,
+            stage
+        )
+
+
+        # TAKİP MESAJI YOK.
+        if level not in (
+            "BUY",
+            "VERY"
+        ):
+
+            return {
+                "status": "PASS",
+                "score": score
+            }
+
+
+        return {
+
+            "status": level,
+
+            "symbol": symbol,
+
+            "score": score,
+
+            "price": price,
+
+            "chg": item["chg"],
+
+            "loc": location,
+
+            "bp": buyer_percent,
+
+            "vr": volume_ratio,
+
+            "vr5": volume5_ratio,
+
+            "rv": current_rsi,
+
+            "ad": adx_value,
+
+            "dist": distance_to_resistance,
+
+            "ema": ema_up,
+
+            "macd": (
+                macd_histogram
+                >
+                previous_macd_histogram
+            ),
+
+            "squeeze": squeeze,
+
+            "hl": higher_low,
+
+            "breakout": breakout
+
+        }
+
+
+    except Exception as e:
+
+        log.debug(
+            "%s: %s",
+            symbol,
+            e
+        )
+
+        return {
+            "status": "error"
+        }
+
+
+# ============================================================
+# TELEGRAM MESAJI
+# ============================================================
+
+def message(result):
+
+    if result["status"] == "VERY":
+
+        title = (
+            "🔥 ÇOK GÜÇLÜ AL"
+        )
+
+    else:
+
+        title = (
+            "🟢 AL"
+        )
+
+
+    reasons = []
+
+
+    if result["breakout"]:
+
+        reasons.append(
+            "Direnç kırıldı"
+        )
+
+    elif result["dist"] <= 0.35:
+
+        reasons.append(
+            f"Direnç %{result['dist']:.2f}"
+        )
+
+
+    if result["vr"] >= 1.5:
+
+        reasons.append(
+            f"1m hacim {result['vr']:.1f}x"
+        )
+
+
+    if result["vr5"] >= 1.5:
+
+        reasons.append(
+            f"5m hacim {result['vr5']:.1f}x"
+        )
+
+
+    if result["bp"] >= 65:
+
+        reasons.append(
+            f"Alıcı %{result['bp']:.0f}"
+        )
+
+
+    if result["ema"]:
+
+        reasons.append(
+            "EMA trend"
+        )
+
+
+    if result["macd"]:
+
+        reasons.append(
+            "MACD güçleniyor"
+        )
+
+
+    if result["hl"]:
+
+        reasons.append(
+            "Higher-Low"
+        )
+
+
+    if result["squeeze"]:
+
+        reasons.append(
+            "BB sıkışma"
+        )
+
+
+    return (
+        "🐋 BALİNA RADARI V21\n\n"
+
+        f"{title}\n\n"
+
+        f"🪙 #{result['symbol']}\n"
+
+        f"💰 {result['price']:.8g}\n"
+
+        f"💪 Güç: {result['score']}/100\n\n"
+
+        f"📊 1m Hacim: "
+        f"{result['vr']:.2f}x | "
+        f"5m: {result['vr5']:.2f}x\n"
+
+        f"🛒 Alıcı: "
+        f"%{result['bp']:.0f}\n"
+
+        f"🎯 Direnç: "
+        f"%{result['dist']:.2f}\n"
+
+        f"📈 RSI: "
+        f"{result['rv']:.0f} | "
+        f"ADX: {result['ad']:.0f}\n"
+
+        f"🚀 Kırılım: "
+        f"{'✅' if result['breakout'] else '⏳'}\n\n"
+
+        f"🔎 "
+        f"{' • '.join(reasons[:7])}\n\n"
+
+        (
+            "🚀 Güçlü teyit."
+            if result["status"] == "VERY"
+            else
+            "🎯 Alım teyidi oluştu."
+        )
+        )

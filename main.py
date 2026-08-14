@@ -4883,3 +4883,792 @@ def scan():
         >
         SCAN_INTERVAL * 1.25
 )
+# =========================================================
+# V22 | GELİŞMİŞ PERFORMANCE
+# =========================================================
+
+def performance_bucket(
+    rows,
+    low,
+    high
+):
+
+    selected = [
+        row
+        for row in rows
+        if low <= row[0] < high
+    ]
+
+
+    if not selected:
+
+        return {
+            "samples": 0
+        }
+
+
+    n = len(
+        selected
+    )
+
+
+    avg_max = (
+        sum(
+            row[3]
+            for row in selected
+        )
+        /
+        n
+    )
+
+
+    avg_min = (
+        sum(
+            row[4]
+            for row in selected
+        )
+        /
+        n
+    )
+
+
+    avg_c5 = (
+        sum(
+            row[5]
+            for row in selected
+            if row[5] is not None
+        )
+        /
+        max(
+            1,
+            sum(
+                row[5] is not None
+                for row in selected
+            )
+        )
+    )
+
+
+    avg_c15 = (
+        sum(
+            row[6]
+            for row in selected
+            if row[6] is not None
+        )
+        /
+        max(
+            1,
+            sum(
+                row[6] is not None
+                for row in selected
+            )
+        )
+    )
+
+
+    positive_15m = [
+        row
+        for row in selected
+        if (
+            row[6] is not None
+            and
+            row[6] > 0
+        )
+    ]
+
+
+    win_rate = (
+        len(
+            positive_15m
+        )
+        /
+        n
+        *
+        100
+    )
+
+
+    return {
+        "samples": n,
+        "avg_max_pct": round(
+            avg_max,
+            2
+        ),
+        "avg_min_pct": round(
+            avg_min,
+            2
+        ),
+        "avg_5m_pct": round(
+            avg_c5,
+            2
+        ),
+        "avg_15m_pct": round(
+            avg_c15,
+            2
+        ),
+        "positive_15m_pct": round(
+            win_rate,
+            1
+        )
+    }
+
+
+# =========================================================
+# STATUS PERFORMANSI
+# =========================================================
+
+def performance_status(
+    rows,
+    status
+):
+
+    selected = [
+        row
+        for row in rows
+        if row[7] == status
+    ]
+
+
+    if not selected:
+
+        return {
+            "samples": 0
+        }
+
+
+    n = len(
+        selected
+    )
+
+
+    completed = [
+        row
+        for row in selected
+        if row[6] is not None
+    ]
+
+
+    if not completed:
+
+        return {
+            "samples": n,
+            "completed_15m": 0
+        }
+
+
+    avg_15m = (
+        sum(
+            row[6]
+            for row in completed
+        )
+        /
+        len(completed)
+    )
+
+
+    positive = sum(
+        row[6] > 0
+        for row in completed
+    )
+
+
+    return {
+        "samples": n,
+        "completed_15m": len(
+            completed
+        ),
+        "avg_15m_pct": round(
+            avg_15m,
+            2
+        ),
+        "positive_15m_pct": round(
+            (
+                positive
+                /
+                len(completed)
+                *
+                100
+            ),
+            1
+        )
+    }
+
+
+# =========================================================
+# PERFORMANCE ENDPOINT DATA
+# =========================================================
+
+def build_performance():
+
+    rows = DBS.performance_summary()
+
+
+    if not rows:
+
+        return {
+            "samples": 0,
+            "note": (
+                "Henüz 15dk+ tamamlanmış "
+                "sinyal yok."
+            )
+        }
+
+
+    n = len(
+        rows
+    )
+
+
+    avg_max = (
+        sum(
+            r[3]
+            for r in rows
+        )
+        /
+        n
+    )
+
+
+    avg_min = (
+        sum(
+            r[4]
+            for r in rows
+        )
+        /
+        n
+    )
+
+
+    completed_15 = [
+        r
+        for r in rows
+        if r[6] is not None
+    ]
+
+
+    avg_c15 = (
+        sum(
+            r[6]
+            for r in completed_15
+        )
+        /
+        len(completed_15)
+        if completed_15
+        else 0
+    )
+
+
+    positive_15 = sum(
+        r[6] > 0
+        for r in completed_15
+    )
+
+
+    # -----------------------------------------------------
+    # Genel sonuç
+    # -----------------------------------------------------
+
+    result = {
+
+        "samples": n,
+
+        "completed_15m":
+            len(completed_15),
+
+        "avg_max_pct":
+            round(
+                avg_max,
+                2
+            ),
+
+        "avg_min_pct":
+            round(
+                avg_min,
+                2
+            ),
+
+        "avg_15m_pct":
+            round(
+                avg_c15,
+                2
+            ),
+
+        "positive_15m_pct":
+            round(
+                (
+                    positive_15
+                    /
+                    len(completed_15)
+                    *
+                    100
+                )
+                if completed_15
+                else 0,
+                1
+            )
+    }
+
+
+    # -----------------------------------------------------
+    # SCORE GRUPLARI
+    # -----------------------------------------------------
+
+    result["score_buckets"] = {
+
+        "68_75":
+            performance_bucket(
+                rows,
+                68,
+                76
+            ),
+
+        "76_83":
+            performance_bucket(
+                rows,
+                76,
+                84
+            ),
+
+        "84_90":
+            performance_bucket(
+                rows,
+                84,
+                91
+            ),
+
+        "91_101":
+            performance_bucket(
+                rows,
+                91,
+                101
+            )
+    }
+
+
+    # -----------------------------------------------------
+    # BUY / VERY
+    # -----------------------------------------------------
+
+    result["levels"] = {
+
+        "BUY":
+            performance_status(
+                rows,
+                "BUY"
+            ),
+
+        "VERY":
+            performance_status(
+                rows,
+                "VERY"
+            )
+    }
+
+
+    # -----------------------------------------------------
+    # TRAP / NORMAL
+    # -----------------------------------------------------
+
+    trap_rows = [
+        r
+        for r in rows
+        if r[15]
+    ]
+
+
+    normal_rows = [
+        r
+        for r in rows
+        if not r[15]
+    ]
+
+
+    def simple_15m_stats(
+        selected
+    ):
+
+        completed = [
+            r
+            for r in selected
+            if r[6] is not None
+        ]
+
+
+        if not completed:
+
+            return {
+                "samples":
+                    len(selected),
+                "completed_15m":
+                    0
+            }
+
+
+        return {
+            "samples":
+                len(selected),
+
+            "completed_15m":
+                len(completed),
+
+            "avg_15m_pct":
+                round(
+                    sum(
+                        r[6]
+                        for r in completed
+                    )
+                    /
+                    len(completed),
+                    2
+                ),
+
+            "positive_15m_pct":
+                round(
+                    (
+                        sum(
+                            r[6] > 0
+                            for r in completed
+                        )
+                        /
+                        len(completed)
+                        *
+                        100
+                    ),
+                    1
+                )
+        }
+
+
+    result["trap"] = (
+        simple_15m_stats(
+            trap_rows
+        )
+    )
+
+
+    result["normal"] = (
+        simple_15m_stats(
+            normal_rows
+        )
+    )
+
+
+    # -----------------------------------------------------
+    # GİRİŞ KALİTESİ
+    # -----------------------------------------------------
+
+    entry_groups = {
+
+        "0_49": [
+            r
+            for r in rows
+            if r[8] < 50
+        ],
+
+        "50_69": [
+            r
+            for r in rows
+            if 50 <= r[8] < 70
+        ],
+
+        "70_84": [
+            r
+            for r in rows
+            if 70 <= r[8] < 85
+        ],
+
+        "85_100": [
+            r
+            for r in rows
+            if r[8] >= 85
+        ]
+    }
+
+
+    result["entry_quality"] = {
+        name:
+            simple_15m_stats(
+                selected
+            )
+        for name, selected
+        in entry_groups.items()
+    }
+
+
+    return result
+
+
+# =========================================================
+# FLASK
+# =========================================================
+
+app = Flask(
+    __name__
+)
+
+
+# =========================================================
+# HOME
+# =========================================================
+
+@app.route("/")
+def home():
+
+    return (
+        "🐋 Balina Radarı V22 Aktif"
+    )
+
+
+# =========================================================
+# HEALTH
+# =========================================================
+
+@app.route("/health")
+def health():
+
+    return {
+
+        "status": "ok",
+
+        "bot":
+            "Balina Radarı V22",
+
+        "base":
+            BASE,
+
+        "scan_interval":
+            SCAN_INTERVAL,
+
+        "workers":
+            WORKERS,
+
+        "max_signals":
+            MAX_SIGNALS,
+
+        "shortlist":
+            SHORTLIST,
+
+        "priority_count":
+            TOP_PRIORITY_COUNT
+    }
+
+
+# =========================================================
+# PERFORMANCE
+# =========================================================
+
+@app.route("/performance")
+def performance():
+
+    return build_performance()
+
+
+# =========================================================
+# MARKET DOĞRULAMA
+# =========================================================
+
+def validate_market():
+
+    info = exchange_info()
+
+
+    symbols = {
+        item.get(
+            "symbol"
+        )
+        for item in info.get(
+            "symbols",
+            []
+        )
+    }
+
+
+    try_count = sum(
+        symbol.endswith(
+            "TRY"
+        )
+        for symbol in symbols
+        if symbol
+    )
+
+
+    if try_count <= 0:
+
+        raise RuntimeError(
+            (
+                f"BASE {BASE} üzerinde "
+                "TRY marketi bulunamadı. "
+                "BINANCE_TR_BASE kontrol "
+                "edilmeli."
+            )
+        )
+
+
+    market_exists = (
+        MARKET_SYMBOL
+        in
+        symbols
+    )
+
+
+    if not market_exists:
+
+        log.warning(
+            (
+                "V22 | %s bulunamadı. "
+                "BTC/TRY market filtresi "
+                "VERİ YOK olarak çalışacak."
+            ),
+            MARKET_SYMBOL
+        )
+
+
+    log.info(
+        (
+            "V22 | Binance TR market "
+            "doğrulandı | TRY:%d | "
+            "Market:%s"
+        ),
+        try_count,
+        MARKET_SYMBOL
+    )
+
+
+# =========================================================
+# ANA DÖNGÜ
+# =========================================================
+
+def loop():
+
+    log.info(
+        "🐋 BALİNA RADARI V22 "
+        "başlatılıyor..."
+    )
+
+
+    # -----------------------------------------------------
+    # MARKET KONTROLÜ
+    # -----------------------------------------------------
+
+    try:
+
+        validate_market()
+
+    except Exception as e:
+
+        log.exception(
+            "MARKET DOĞRULAMA HATASI: %s",
+            e
+        )
+
+        return
+
+
+    # -----------------------------------------------------
+    # TELEGRAM BAŞLANGIÇ MESAJI
+    # -----------------------------------------------------
+
+    if TOKEN and CHAT:
+
+        telegram(
+            (
+                "🐋 BALİNA RADARI V22 AKTİF\n"
+                "🟢 AL → 🔥 ÇOK GÜÇLÜ AL\n"
+                "🏆 Öncelik sıralaması aktif\n"
+                "⚠️ TRAP filtresi aktif"
+            )
+        )
+
+
+    # -----------------------------------------------------
+    # SÜREKLİ TARAMA
+    # -----------------------------------------------------
+
+    while True:
+
+        started = time.time()
+
+
+        try:
+
+            backoff = scan()
+
+        except Exception:
+
+            log.exception(
+                "Tarama döngüsü hatası"
+            )
+
+            backoff = True
+
+
+        elapsed = (
+            time.time()
+            -
+            started
+        )
+
+
+        # -------------------------------------------------
+        # HATA / YAVAŞLIK DURUMU
+        # -------------------------------------------------
+
+        if backoff:
+
+            sleep_time = max(
+                180,
+                SCAN_INTERVAL * 3
+            )
+
+        else:
+
+            sleep_time = max(
+                1,
+                SCAN_INTERVAL
+                -
+                elapsed
+            )
+
+
+        log.debug(
+            (
+                "V22 | Tarama %.2fs | "
+                "Sonraki tarama %.2fs"
+            ),
+            elapsed,
+            sleep_time
+        )
+
+
+        time.sleep(
+            sleep_time
+        )
+
+
+# =========================================================
+# THREAD
+# =========================================================
+
+Thread(
+    target=loop,
+    daemon=True,
+    name="balina-v22"
+).start()
+
+
+# =========================================================
+# UYGULAMA
+# =========================================================
+
+if __name__ == "__main__":
+
+    app.run(
+        host="0.0.0.0",
+        port=int(
+            os.getenv(
+                "PORT",
+                "8080"
+            )
+        ),
+        use_reloader=False
+    )

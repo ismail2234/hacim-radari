@@ -2436,4 +2436,26 @@ class DB:
                 SELECT
                     score,
                     setup,
-                  
+           confirmation,
+                    max_pct,
+                    min_pct,
+                    c5,
+                    c15,
+                    status,
+                    entry_quality,
+                    priority,
+                    d30,
+                    d90,
+                    trade_1m,
+                    trade_5m,
+                    market_momentum,
+                    trap
+                FROM signals
+                WHERE c15 IS NOT NULL
+                """
+            ).fetchall()
+
+
+DBS = DB(
+    DB_PATH
+)       

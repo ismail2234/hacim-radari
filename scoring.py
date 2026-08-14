@@ -1173,16 +1173,13 @@ def priority_score(
         min(
             100,
             round(value, 1)
-        )
-    )
-
-
-def rank_signals(
+    (def rank_signals(
     cfg: Settings,
     signals: list[dict]
 ) -> list[dict]:
 
     for r in signals:
+
         r["priority"] = priority_score(
             cfg,
             r
@@ -1194,4 +1191,13 @@ def rank_signals(
             x["entry_quality"],
             x["score"]
         ),
-        reverse=T
+        reverse=True
+    )
+
+    for i, r in enumerate(
+        signals,
+        1
+    ):
+        r["rank"] = i
+
+    return signals

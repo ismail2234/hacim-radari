@@ -891,3 +891,551 @@ def shortlist(items):
         key=rank,
         reverse=True
     )[:SHORTLIST]
+def analyze(item):
+    symbol = item["symbol"]
+    price = item["price"]
+
+    try:
+        k5 = klines(symbol, "5m", 80)
+
+        if len(k5) < 40:
+            return {"status": "PASS"}
+
+        c5 = k5[:-1]
+        close5 = [float(x[4]) for x in c5]
+        volume5 = [float(x[7]) for x in c5]
+        trades5 = [int(x[8]) for x in c5]
+
+        avg5 = avg(volume5[-12:])
+        recent5 = avg(volume5[-3:])
+
+        vr5 = recent5 / avg5 if avg5 else 0
+        momentum5 = pct(close5[-4], price)
+
+        if momentum5 < -3 and vr5 < 1.3:
+            return {"status": "PASS"}
+
+        trend = daily_trend(symbol)
+
+        d30 = trend["d30"] if trend["ok"] else None
+        d90 = trend["d90"] if trend["ok"] else None
+
+        lt_penalty = (
+            long_term_penalty(d30, d90)
+            if trend["ok"]
+            else -5
+        )
+
+        k1 = klines(symbol, "1m", 180)
+
+        if len(k1) < 100:
+            return {"status": "PASS"}
+
+        c1 = k1[:-1]
+
+        close = [float(x[4]) for x in c1]
+        high = [float(x[2]) for x in c1]
+        low = [float(x[3]) for x in c1]
+        volume = [float(x[7]) for x in c1]
+        trades = [int(x[8]) for x in c1]
+
+        price = close[-1]
+
+        momentum1 = pct(close[-2], price)
+
+        low90 = min(low[-90:])
+        high90 = max(high[-90:])
+
+        location = (
+            (price - low90)
+            / (high90 - low90)
+            * 100
+            if high90 > low90
+            else 50
+        )
+
+        avg_volume = avg(volume[-30:])
+        last3 = avg(volume[-3:])
+        previous = avg(volume[-10:-3])
+
+        vr = last3 / avg_volume if avg_volume else 0
+        impulse = last3 / previous if previous else 1
+
+        buy_volume = sum(
+            float(x[10])
+            for x in c1[-5:]
+        )
+
+        total_volume = sum(
+            float(x[7])
+            for x in c1[-5:]
+        )
+
+        bp = (
+            buy_volume / total_volume * 100
+            if total_volume
+            else 50
+        )
+
+        trades1 = sum(trades[-5:])
+        trades5 = sum(trades5[-1:])
+
+        ema9 = ema(close, 9)
+        ema21 = ema(close, 21)
+        ema50 = ema(close, 50)
+
+        ema9_old = ema(close[:-3], 9)
+        ema21_old = ema(close[:-3], 21)
+
+        ema_up = (
+            ema9 > ema21
+            and ema9 > ema9_old
+        )
+
+        ema_cross = (
+            ema9 > ema21
+            and ema9_old <= ema21_old
+        )
+
+        rv = rsi(close)
+        old_rsi = rsi(close[:-3])
+
+        _, _, macd_now = macd(close)
+        _, _, macd_old = macd(close[:-3])
+
+        macd_up = macd_now > macd_old
+
+        ad, plus_di, minus_di = adx(
+            high,
+            low,
+            close
+        )
+
+        lower, middle, upper = bb(close)
+
+        width = (
+            (upper - lower) / middle * 100
+            if middle else 0
+        )
+
+        old_lower, old_middle, old_upper = bb(
+            close[:-5]
+        )
+
+        old_width = (
+            (old_upper - old_lower)
+            / old_middle
+            * 100
+            if old_middle else width
+        )
+
+        squeeze = (
+            width <= 2.2
+            or (
+                old_width > 0
+                and width < old_width * 0.80
+            )
+        )
+
+        expanding = (
+            old_width > 0
+            and width > old_width * 1.08
+        )
+
+        resistance = max(high[-30:-2])
+
+        dist = max(
+            0,
+            (resistance - price)
+            / price
+            * 100
+        )
+
+        breakout = price > resistance
+        closed_breakout = close[-1] > resistance
+        near = dist <= 0.35
+
+        candle_range = high[-1] - low[-1]
+
+        close_position = (
+            (close[-1] - low[-1])
+            / candle_range
+            * 100
+            if candle_range > 0 else 50
+        )
+
+        higher_low = (
+            low[-1] > low[-3]
+            and low[-3] >= low[-6]
+        )
+
+        low_activity = (
+            trades1 < MIN_1M_TRADES
+            or trades5 < MIN_5M_TRADES
+        )
+
+        weak_volume = (
+            vr < 1.0
+            or vr5 < 1.0
+        )
+
+        trap_reasons = []
+
+        if bp < TRAP_BUYER and vr >= TRAP_VOLUME:
+            trap_reasons.append("zayıf alıcı")
+
+        if momentum5 < TRAP_MOMENTUM and not higher_low:
+            trap_reasons.append("negatif momentum")
+
+        if low_activity and vr >= 2:
+            trap_reasons.append("düşük işlem")
+
+        if (
+            low_activity
+            and weak_volume
+            and bp >= 90
+        ):
+            trap_reasons.append("güvenilmez baskı")
+
+        trap = bool(trap_reasons)
+
+        setup = 0
+
+        if ema_up:
+            setup += 12
+
+        if ema_cross:
+            setup += 6
+
+        if squeeze:
+            setup += 8
+
+        if higher_low:
+            setup += 6
+
+        if 35 <= rv <= 65 and rv > old_rsi:
+            setup += 8
+
+        if price >= ema50:
+            setup += 5
+
+        if near or dist <= 0.70:
+            setup += 8
+
+        if vr >= 1.5 and trades1 >= MIN_1M_TRADES:
+            setup += 8
+
+        if bp >= 58 and trades1 >= MIN_1M_TRADES:
+            setup += 5
+
+        confirmation = 0
+
+        if closed_breakout:
+            confirmation += 18
+        elif breakout:
+            confirmation += 10
+
+        if vr >= 2:
+            confirmation += 12
+        elif vr >= 1.5:
+            confirmation += 7
+
+        if vr5 >= 1.5:
+            confirmation += 8
+
+        if bp >= 65 and trades1 >= MIN_1M_TRADES:
+            confirmation += 7
+
+        if macd_up:
+            confirmation += 6
+
+        if plus_di > minus_di and ad >= 18:
+            confirmation += 7
+
+        if close_position >= 65:
+            confirmation += 4
+
+        if expanding:
+            confirmation += 4
+
+        if (
+            trades1 >= MIN_1M_TRADES
+            and trades5 >= MIN_5M_TRADES
+        ):
+            confirmation += 3
+
+        if weak_volume:
+            confirmation -= 8
+
+        if ad < 10:
+            confirmation -= 10
+
+        if low_activity:
+            confirmation -= 8
+
+        penalty = lt_penalty
+
+        if momentum1 > 2.5:
+            penalty -= 10
+
+        if momentum5 > 5:
+            penalty -= 12
+
+        if rv > 78:
+            penalty -= 10
+
+        if rv >= 85:
+            penalty -= 8
+
+        if bp < 50 and vr >= 1.8:
+            penalty -= 8
+
+        if momentum5 < -1.2 and not higher_low:
+            penalty -= 12
+
+        if (
+            vr >= 2
+            and trades1 < MIN_1M_TRADES
+        ):
+            penalty -= 8
+
+        if trap:
+            penalty -= 12
+
+        if d90 is not None:
+            if d90 <= LT90_EXTREME:
+                penalty -= 8
+            elif d90 <= LT90_STRONG:
+                penalty -= 5
+
+        market = market_context()
+
+        market_momentum = market.get(
+            "momentum",
+            0
+        )
+
+        if abs(market_momentum) >= MARKET_MOVE * 2:
+            penalty -= 8
+        elif abs(market_momentum) >= MARKET_MOVE:
+            penalty -= 4
+
+        entry = 100
+
+        if rv >= 85:
+            entry -= 30
+        elif rv >= 78:
+            entry -= 15
+
+        if momentum1 >= 5:
+            entry -= 25
+        elif momentum1 >= 2.5:
+            entry -= 12
+
+        if momentum5 >= 5:
+            entry -= 20
+        elif momentum5 >= 3:
+            entry -= 10
+
+        if dist <= 0.15:
+            entry -= 8
+        elif dist <= 0.35:
+            entry -= 4
+
+        if closed_breakout:
+            entry += 5
+
+        if higher_low:
+            entry += 5
+
+        if trades1 < MIN_1M_TRADES:
+            entry -= 18
+
+        if trades1 < 5:
+            entry -= 15
+
+        if vr < 1.0:
+            entry -= 12
+
+        if vr5 < 1.0:
+            entry -= 10
+
+        if ad < 10:
+            entry -= 12
+
+        if d30 is not None and d30 >= 20:
+            entry -= 5
+
+        if d90 is not None and d90 <= LT90_STRONG:
+            entry -= 10
+
+        if trap:
+            entry -= 20
+
+        entry = max(
+            0,
+            min(100, int(round(entry)))
+        )
+
+        score = clamp(
+            setup
+            + confirmation
+            + penalty
+        )
+
+        if low_activity:
+            score = min(score, 78)
+
+        if weak_volume:
+            score = min(score, 82)
+
+        if ad < 10:
+            score = min(score, 72)
+
+        if rv >= 90 and trades1 < MIN_1M_TRADES:
+            score = min(score, 65)
+
+        if (
+            d90 is not None
+            and d90 <= LT90_EXTREME
+        ):
+            score = min(score, 82)
+
+        stage = "NONE"
+
+        if setup >= 25:
+            stage = "SETUP"
+
+        if (
+            score >= 68
+            and confirmation >= 18
+            and not weak_volume
+        ):
+            stage = "CONFIRMED"
+
+        very_ok = (
+            d30 is not None
+            and d90 is not None
+            and d30 > LT30_STRONG
+            and d90 > LT90_STRONG
+        )
+
+        very_ok = (
+            very_ok
+            and not low_activity
+            and not weak_volume
+            and ad >= 18
+            and rv < 85
+            and not trap
+        )
+
+        if (
+            score >= 84
+            and confirmation >= 28
+            and vr >= 1.5
+            and vr5 >= 1.0
+            and very_ok
+            and closed_breakout
+        ):
+            stage = "VERY"
+
+        level = {
+            "VERY": "VERY",
+            "CONFIRMED": "BUY",
+            "SETUP": "INTERNAL"
+        }.get(stage, "PASS")
+
+        qualified = (
+            stage in (
+                "SETUP",
+                "CONFIRMED",
+                "VERY"
+            )
+            and not trap
+        )
+
+        streak = DBS.update_streak(
+            symbol,
+            qualified,
+            trap
+        )
+
+        if level == "BUY" and streak < BUY_STREAK:
+            level = "INTERNAL"
+
+        if level == "VERY" and streak < VERY_STREAK:
+            level = "INTERNAL"
+
+        return {
+            "status": level,
+            "symbol": symbol,
+            "score": score,
+            "setup": setup,
+            "confirmation": confirmation,
+            "penalty": penalty,
+            "price": price,
+            "chg": item["chg"],
+            "loc": location,
+            "bp": bp,
+            "vr": vr,
+            "vr5": vr5,
+            "impulse": min(impulse, 10),
+            "rv": rv,
+            "ad": ad,
+            "dist": dist,
+            "ema": ema_up,
+            "macd": macd_up,
+            "squeeze": squeeze,
+            "hl": higher_low,
+            "breakout": breakout,
+            "closed_breakout": closed_breakout,
+            "trades_1m": trades1,
+            "trades_5m": trades5,
+            "trade_conf": trade_confidence(
+                trades1,
+                vr
+            ),
+            "d30": d30,
+            "d90": d90,
+            "trend_state": (
+                "VERİ YOK"
+                if not trend["ok"]
+                else
+                "POZİTİF TREND"
+                if d30 > 10 and d90 > 0
+                else
+                "YÜKSEK DÜŞÜŞ RİSKİ"
+                if (
+                    d90 <= LT90_EXTREME
+                    or d30 <= LT30_STRONG
+                )
+                else
+                "DÜŞÜŞ RİSKİ"
+                if (
+                    d90 <= LT90_STRONG
+                    or d30 <= LT30_MILD
+                )
+                else "NÖTR"
+            ),
+            "trap": trap,
+            "trap_reasons": trap_reasons,
+            "entry_quality": entry,
+            "streak": streak,
+            "market_momentum": market_momentum,
+            "market_state": market.get(
+                "state",
+                "VERİ YOK"
+            )
+        }
+
+    except Exception as e:
+        log.debug(
+            "%s: %s",
+            symbol,
+            e
+        )
+
+        return {
+            "status": "error",
+            "symbol": symbol
+        }

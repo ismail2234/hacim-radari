@@ -3758,3 +3758,19 @@ def analyze(item):
                 <
                 BUY_STREAK_REQUIRED
             ):
+ # Tek taramada oluşan güçlü
+                # hareketi hemen dışarı göndermiyoruz.
+                #
+                # Ancak state'te SETUP olarak
+                # tutulmaya devam ediyor.
+
+                level = "INTERNAL"
+
+
+        elif level == "VERY":
+
+            if (
+                streak
+                <
+                VERY_STREAK_REQUIRED
+            ):

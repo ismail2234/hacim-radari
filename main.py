@@ -3874,3 +3874,38 @@ buyer_percent >= 65
 
             "trend_penalty":
                 trend_penalty,
+"trend_state":
+                trend_state,
+
+            "long_term_ok":
+                long_term_ok,
+
+            "trap":
+                trap,
+
+            "trap_reasons":
+                trap_reasons,
+
+            "market_momentum":
+                market_momentum,
+
+            "market_state":
+                market_state,
+
+            "entry_quality":
+                entry_quality,
+
+            "streak":
+                streak
+        }
+
+
+    except Exception as e:
+
+        log.debug(
+            "%s: %s",
+            symbol,
+            e
+        )
+
+       

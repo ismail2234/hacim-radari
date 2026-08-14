@@ -3786,3 +3786,16 @@ def analyze(item):
                     and
                     volume_ratio >= 2.0
                     and
+buyer_percent >= 65
+                    and
+                    trades_1m
+                    >=
+                    MIN_1M_TRADES
+                    and
+                    not trap
+                )
+
+
+                if not instant_very:
+
+                    level = "INTERNAL"

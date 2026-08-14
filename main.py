@@ -3907,5 +3907,8 @@ buyer_percent >= 65
             symbol,
             e
         )
-
+return {
+            "status": "error",
+            "symbol": symbol
+}
        

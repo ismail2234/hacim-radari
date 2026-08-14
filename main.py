@@ -3774,3 +3774,15 @@ def analyze(item):
                 <
                 VERY_STREAK_REQUIRED
             ):
+# Çok güçlü anlık breakout için
+                # kontrollü istisna:
+                #
+                # Kapalı mum kırılımı + yüksek hacim
+                # + güçlü alıcı + yeterli işlem
+                # varsa streak beklemeden korunabilir.
+
+                instant_very = (
+                    closed_breakout
+                    and
+                    volume_ratio >= 2.0
+                    and

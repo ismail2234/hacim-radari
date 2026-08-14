@@ -3798,4 +3798,27 @@ buyer_percent >= 65
 
                 if not instant_very:
 
-                    level = "INTERNAL"
+          # =================================================
+        # 30) PRIORITY
+        #
+        # Gerçek sıralama fonksiyonu sonraki parçada
+        # kullanılacak.
+        # Burada ham bileşenleri döndürüyoruz.
+        # =================================================
+
+        return {
+
+            "status": level,
+
+            "symbol": symbol,
+
+            "score": score,
+
+            "setup": setup,
+
+            "confirmation": confirmation,
+
+            "penalty": penalty,
+
+            "price": price,
+            level = "INTERNAL"

@@ -365,3 +365,289 @@ def clamp(value):
             int(round(value))
         )
 )
+def ema(values, period):
+    if not values:
+        return 0.0
+    if len(values) < period:
+        return avg(values)
+
+    k = 2 / (period + 1)
+    result = avg(values[:period])
+
+    for value in values[period:]:
+        result = value * k + result * (1 - k)
+
+    return result
+
+
+def rsi(values, period=14):
+    if len(values) < period + 1:
+        return 50.0
+
+    gains = []
+    losses = []
+
+    for i in range(1, len(values)):
+        diff = values[i] - values[i - 1]
+        gains.append(max(diff, 0))
+        losses.append(max(-diff, 0))
+
+    gain = avg(gains[-period:])
+    loss = avg(losses[-period:])
+
+    if loss == 0:
+        return 100.0
+
+    return 100 - 100 / (1 + gain / loss)
+
+
+def macd(values):
+    if len(values) < 35:
+        return 0, 0, 0
+
+    values_macd = []
+
+    for i in range(26, len(values) + 1):
+        values_macd.append(
+            ema(values[:i], 12)
+            - ema(values[:i], 26)
+        )
+
+    main = values_macd[-1]
+    signal = ema(values_macd, 9)
+
+    return main, signal, main - signal
+
+
+def bb(values, period=20, k=2):
+    if len(values) < period:
+        return 0, 0, 0
+
+    sample = values[-period:]
+    middle = avg(sample)
+
+    deviation = (
+        avg([
+            (x - middle) ** 2
+            for x in sample
+        ])
+    ) ** 0.5
+
+    return (
+        middle - k * deviation,
+        middle,
+        middle + k * deviation
+    )
+
+
+def adx(highs, lows, closes, period=14):
+    if len(closes) < period * 2 + 1:
+        return 0, 0, 0
+
+    tr = []
+    plus = []
+    minus = []
+
+    for i in range(1, len(closes)):
+        tr.append(
+            max(
+                highs[i] - lows[i],
+                abs(highs[i] - closes[i - 1]),
+                abs(lows[i] - closes[i - 1])
+            )
+        )
+
+        up = highs[i] - highs[i - 1]
+        down = lows[i - 1] - lows[i]
+
+        plus.append(
+            up if up > down and up > 0 else 0
+        )
+
+        minus.append(
+            down if down > up and down > 0 else 0
+        )
+
+    atr = avg(tr[-period:])
+    p = avg(plus[-period:])
+    m = avg(minus[-period:])
+
+    if atr <= 0:
+        return 0, 0, 0
+
+    plus_di = 100 * p / atr
+    minus_di = 100 * m / atr
+
+    total = plus_di + minus_di
+
+    dx = (
+        100 * abs(plus_di - minus_di) / total
+        if total
+        else 0
+    )
+
+    return dx, plus_di, minus_di
+
+
+def daily_trend(symbol):
+    now = time.time()
+
+    with DAILY_CACHE_LOCK:
+        cached = DAILY_CACHE.get(symbol)
+
+        if cached:
+            ts, data = cached
+            if now - ts < DAILY_CACHE_TTL:
+                return data
+
+    data = klines(symbol, "1d", 100)
+
+    if len(data) < 92:
+        result = {
+            "ok": False,
+            "d30": 0,
+            "d90": 0
+        }
+
+        with DAILY_CACHE_LOCK:
+            DAILY_CACHE[symbol] = (now, result)
+
+        return result
+
+    closed = data[:-1]
+
+    try:
+        closes = [float(x[4]) for x in closed]
+    except (TypeError, ValueError):
+        return {
+            "ok": False,
+            "d30": 0,
+            "d90": 0
+        }
+
+    current = closes[-1]
+
+    result = {
+        "ok": True,
+        "d30": pct(closes[-31], current),
+        "d90": pct(closes[-91], current)
+    }
+
+    with DAILY_CACHE_LOCK:
+        DAILY_CACHE[symbol] = (now, result)
+
+    return result
+
+
+def long_term_penalty(d30, d90):
+    penalty = 0
+
+    if d30 <= LT30_STRONG:
+        penalty -= 8
+    elif d30 <= LT30_MILD:
+        penalty -= 4
+
+    if d90 <= LT90_EXTREME:
+        penalty -= 15
+    elif d90 <= LT90_STRONG:
+        penalty -= 10
+    elif d90 <= LT90_MILD:
+        penalty -= 5
+
+    return penalty
+
+
+def trade_confidence(trades, volume_ratio):
+    if trades <= 0:
+        return 0
+
+    if (
+        volume_ratio >= 2
+        and trades < MIN_1M_TRADES
+    ):
+        return 0.25
+
+    if trades < MIN_1M_TRADES:
+        return 0.40
+
+    return min(
+        1.0,
+        max(
+            0.40,
+            trades / TRADE_REFERENCE
+        )
+    )
+
+
+def market_context():
+    now = time.time()
+
+    with MARKET_CACHE_LOCK:
+        cached = MARKET_CACHE.get(MARKET_SYMBOL)
+
+        if cached:
+            ts, data = cached
+            if now - ts < DAILY_CACHE_TTL:
+                return data
+
+    data = klines(
+        MARKET_SYMBOL,
+        "5m",
+        20
+    )
+
+    if len(data) < 5:
+        return {
+            "ok": False,
+            "momentum": 0,
+            "state": "VERİ YOK"
+        }
+
+    try:
+        closes = [
+            float(x[4])
+            for x in data[:-1]
+        ]
+    except (TypeError, ValueError):
+        return {
+            "ok": False,
+            "momentum": 0,
+            "state": "VERİ YOK"
+        }
+
+    if len(closes) < 4:
+        return {
+            "ok": False,
+            "momentum": 0,
+            "state": "VERİ YOK"
+        }
+
+    momentum = pct(
+        closes[-4],
+        closes[-1]
+    )
+
+    if abs(momentum) >= MARKET_MOVE * 2:
+        state = "AŞIRI HAREKETLİ"
+    elif abs(momentum) >= MARKET_MOVE:
+        state = "HAREKETLİ"
+    elif momentum > 0.5:
+        state = "POZİTİF"
+    elif momentum < -0.5:
+        state = "NEGATİF"
+    else:
+        state = "NÖTR"
+
+    result = {
+        "ok": True,
+        "momentum": momentum,
+        "state": state
+    }
+
+    with MARKET_CACHE_LOCK:
+        MARKET_CACHE[MARKET_SYMBOL] = (
+            now,
+            result
+        )
+
+    return result

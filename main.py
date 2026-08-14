@@ -2020,3 +2020,266 @@ def scan():
         or
         elapsed > SCAN_INTERVAL * 1.25
     )
+def performance():
+
+    rows = DBS.performance_summary()
+
+    if not rows:
+        return {
+            "samples": 0,
+            "note": "Henüz 15dk+ tamamlanmış sinyal yok."
+        }
+
+    completed = [
+        r for r in rows
+        if r[6] is not None
+    ]
+
+    def stats(data):
+
+        done = [
+            r for r in data
+            if r[6] is not None
+        ]
+
+        if not done:
+            return {
+                "samples": len(data),
+                "completed": 0
+            }
+
+        return {
+            "samples": len(data),
+            "completed": len(done),
+            "avg_15m_pct": round(
+                avg([
+                    r[6]
+                    for r in done
+                ]),
+                2
+            ),
+            "positive_15m_pct": round(
+                (
+                    sum(
+                        r[6] > 0
+                        for r in done
+                    )
+                    /
+                    len(done)
+                    *
+                    100
+                ),
+                1
+            )
+        }
+
+    result = {
+        "samples": len(rows),
+        "completed_15m": len(completed),
+        "avg_max_pct": round(
+            avg([
+                r[3]
+                for r in rows
+            ]),
+            2
+        ),
+        "avg_min_pct": round(
+            avg([
+                r[4]
+                for r in rows
+            ]),
+            2
+        ),
+        "avg_15m_pct": round(
+            avg([
+                r[6]
+                for r in completed
+            ]),
+            2
+        ) if completed else 0
+    }
+
+    result["score"] = {
+        "68_75": stats([
+            r for r in rows
+            if 68 <= r[0] < 76
+        ]),
+        "76_83": stats([
+            r for r in rows
+            if 76 <= r[0] < 84
+        ]),
+        "84_90": stats([
+            r for r in rows
+            if 84 <= r[0] < 91
+        ]),
+        "91_100": stats([
+            r for r in rows
+            if r[0] >= 91
+        ])
+    }
+
+    result["level"] = {
+        "BUY": stats([
+            r for r in rows
+            if r[7] == "BUY"
+        ]),
+        "VERY": stats([
+            r for r in rows
+            if r[7] == "VERY"
+        ])
+    }
+
+    result["entry_quality"] = {
+        "0_49": stats([
+            r for r in rows
+            if r[8] < 50
+        ]),
+        "50_69": stats([
+            r for r in rows
+            if 50 <= r[8] < 70
+        ]),
+        "70_84": stats([
+            r for r in rows
+            if 70 <= r[8] < 85
+        ]),
+        "85_100": stats([
+            r for r in rows
+            if r[8] >= 85
+        ])
+    }
+
+    return result
+
+
+app = Flask(__name__)
+
+
+@app.route("/")
+def home():
+    return "🐋 Balina Radarı V22 Aktif"
+
+
+@app.route("/health")
+def health():
+    return {
+        "status": "ok",
+        "bot": "Balina Radarı V22",
+        "base": BASE,
+        "scan_interval": SCAN_INTERVAL,
+        "workers": WORKERS
+    }
+
+
+@app.route("/performance")
+def performance_route():
+    return performance()
+
+
+def validate_market():
+
+    info = exchange_info()
+
+    symbols = {
+        x.get("symbol")
+        for x in info.get(
+            "symbols",
+            []
+        )
+    }
+
+    try_count = sum(
+        s.endswith("TRY")
+        for s in symbols
+        if s
+    )
+
+    if try_count <= 0:
+        raise RuntimeError(
+            f"BASE {BASE} üzerinde TRY marketi bulunamadı."
+        )
+
+    if MARKET_SYMBOL not in symbols:
+        log.warning(
+            "%s bulunamadı; BTC filtresi devre dışı.",
+            MARKET_SYMBOL
+        )
+
+    log.info(
+        "V22 | Binance TR doğrulandı | TRY:%d",
+        try_count
+    )
+
+
+def loop():
+
+    log.info(
+        "🐋 BALİNA RADARI V22 başlatılıyor..."
+    )
+
+    try:
+        validate_market()
+    except Exception as e:
+        log.exception(
+            "MARKET DOĞRULAMA HATASI: %s",
+            e
+        )
+        return
+
+    if TOKEN and CHAT:
+        telegram(
+            "🐋 BALİNA RADARI V22 AKTİF\n"
+            "🏆 Öncelik sistemi aktif\n"
+            "⚠️ TRAP filtresi aktif"
+        )
+
+    while True:
+
+        started = time.time()
+
+        try:
+            backoff = scan()
+        except Exception:
+            log.exception(
+                "Tarama döngüsü hatası"
+            )
+            backoff = True
+
+        elapsed = (
+            time.time() - started
+        )
+
+        if backoff:
+            time.sleep(
+                max(
+                    180,
+                    SCAN_INTERVAL * 3
+                )
+            )
+        else:
+            time.sleep(
+                max(
+                    1,
+                    SCAN_INTERVAL - elapsed
+                )
+            )
+
+
+Thread(
+    target=loop,
+    daemon=True,
+    name="balina-v22"
+).start()
+
+
+if __name__ == "__main__":
+
+    app.run(
+        host="0.0.0.0",
+        port=int(
+            os.getenv(
+                "PORT",
+                "8080"
+            )
+        ),
+        use_reloader=False
+            )

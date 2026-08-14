@@ -3848,3 +3848,29 @@ buyer_percent >= 65
             "hl": higher_low,
 
             "breakout": breakout,
+"closed_breakout":
+                closed_breakout,
+
+            "impulse":
+                volume_impulse,
+
+            "trades_1m":
+                trades_1m,
+
+            "trades_5m":
+                trades_5m,
+
+            "trade_conf":
+                trade_conf,
+
+            "trade_status":
+                trade_status_text,
+
+            "d30":
+                d30,
+
+            "d90":
+                d90,
+
+            "trend_penalty":
+                trend_penalty,

@@ -2562,3 +2562,23 @@ def shortlist(items):
             0
         )
 
+ return (
+            volume
+            *
+            (
+                1
+                +
+                positive_change
+                /
+                100
+            )
+        )
+
+
+    return sorted(
+        items,
+        key=ranking,
+        reverse=True
+    )[
+        :SHORTLIST
+    ]

@@ -1556,3 +1556,884 @@ def market_penalty(
 
 
     return 0
+# =========================================================
+# DATABASE
+# =========================================================
+
+class DB:
+
+    def __init__(self, path):
+
+        self.path = path
+        self.lock = Lock()
+
+        with sqlite3.connect(
+            self.path
+        ) as db:
+
+            # -------------------------------------------------
+            # V22 | SQLite performans ayarları
+            # -------------------------------------------------
+
+            db.execute(
+                "PRAGMA journal_mode=WAL"
+            )
+
+            db.execute(
+                "PRAGMA synchronous=NORMAL"
+            )
+
+            db.execute(
+                "PRAGMA busy_timeout=5000"
+            )
+
+
+            # -------------------------------------------------
+            # SİNYAL DURUMU
+            # -------------------------------------------------
+
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS state(
+                    symbol TEXT PRIMARY KEY,
+                    sent REAL DEFAULT 0,
+                    score REAL DEFAULT 0,
+                    level TEXT DEFAULT 'NONE',
+                    stage TEXT DEFAULT 'NONE',
+                    updated REAL DEFAULT 0,
+
+                    streak INTEGER DEFAULT 0,
+                    streak_at REAL DEFAULT 0,
+                    trap INTEGER DEFAULT 0,
+                    priority REAL DEFAULT 0
+                )
+            """)
+
+
+            # -------------------------------------------------
+            # V21'den kalan state tablosu için migration
+            #
+            # Eğer eski DB kullanılıyorsa yeni kolonlar
+            # otomatik olarak eklenir.
+            # -------------------------------------------------
+
+            existing_columns = {
+                row[1]
+                for row in db.execute(
+                    "PRAGMA table_info(state)"
+                ).fetchall()
+            }
+
+
+            migrations = {
+                "streak":
+                    "ALTER TABLE state ADD COLUMN "
+                    "streak INTEGER DEFAULT 0",
+
+                "streak_at":
+                    "ALTER TABLE state ADD COLUMN "
+                    "streak_at REAL DEFAULT 0",
+
+                "trap":
+                    "ALTER TABLE state ADD COLUMN "
+                    "trap INTEGER DEFAULT 0",
+
+                "priority":
+                    "ALTER TABLE state ADD COLUMN "
+                    "priority REAL DEFAULT 0"
+            }
+
+
+            for column, sql in migrations.items():
+
+                if column not in existing_columns:
+
+                    db.execute(sql)
+
+
+            # -------------------------------------------------
+            # SİNYAL SONUÇLARI
+            # -------------------------------------------------
+
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS signals(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+                    symbol TEXT,
+                    ts REAL,
+                    price REAL,
+
+                    score REAL,
+                    setup REAL,
+                    confirmation REAL,
+                    penalty REAL,
+
+                    status TEXT,
+
+                    max_pct REAL DEFAULT 0,
+                    min_pct REAL DEFAULT 0,
+
+                    c1 REAL,
+                    c3 REAL,
+                    c5 REAL,
+                    c15 REAL,
+
+                    entry_quality REAL DEFAULT 0,
+                    priority REAL DEFAULT 0,
+
+                    d30 REAL DEFAULT 0,
+                    d90 REAL DEFAULT 0,
+
+                    trade_1m REAL DEFAULT 0,
+                    trade_5m REAL DEFAULT 0,
+
+                    market_momentum REAL DEFAULT 0,
+
+                    trap INTEGER DEFAULT 0
+                )
+            """)
+
+
+            # -------------------------------------------------
+            # V21 signals tablosu migration
+            # -------------------------------------------------
+
+            existing_signal_columns = {
+                row[1]
+                for row in db.execute(
+                    "PRAGMA table_info(signals)"
+                ).fetchall()
+            }
+
+
+            signal_migrations = {
+
+                "entry_quality":
+                    "ALTER TABLE signals ADD COLUMN "
+                    "entry_quality REAL DEFAULT 0",
+
+                "priority":
+                    "ALTER TABLE signals ADD COLUMN "
+                    "priority REAL DEFAULT 0",
+
+                "d30":
+                    "ALTER TABLE signals ADD COLUMN "
+                    "d30 REAL DEFAULT 0",
+
+                "d90":
+                    "ALTER TABLE signals ADD COLUMN "
+                    "d90 REAL DEFAULT 0",
+
+                "trade_1m":
+                    "ALTER TABLE signals ADD COLUMN "
+                    "trade_1m REAL DEFAULT 0",
+
+                "trade_5m":
+                    "ALTER TABLE signals ADD COLUMN "
+                    "trade_5m REAL DEFAULT 0",
+
+                "market_momentum":
+                    "ALTER TABLE signals ADD COLUMN "
+                    "market_momentum REAL DEFAULT 0",
+
+                "trap":
+                    "ALTER TABLE signals ADD COLUMN "
+                    "trap INTEGER DEFAULT 0"
+            }
+
+
+            for column, sql in (
+                signal_migrations.items()
+            ):
+
+                if column not in (
+                    existing_signal_columns
+                ):
+
+                    db.execute(sql)
+
+
+    # =====================================================
+    # STATE OKUMA
+    # =====================================================
+
+    def get(self, symbol):
+
+        with (
+            self.lock,
+            sqlite3.connect(
+                self.path,
+                timeout=5
+            ) as db
+        ):
+
+            db.execute(
+                "PRAGMA busy_timeout=5000"
+            )
+
+            return db.execute(
+                """
+                SELECT
+                    sent,
+                    score,
+                    level,
+                    stage,
+                    updated,
+                    streak,
+                    streak_at,
+                    trap,
+                    priority
+                FROM state
+                WHERE symbol=?
+                """,
+                (symbol,)
+            ).fetchone()
+
+
+    # =====================================================
+    # STATE YAZMA
+    # =====================================================
+
+    def put(
+        self,
+        symbol,
+        score,
+        level,
+        stage,
+        sent=None,
+        streak=None,
+        trap=None,
+        priority=None
+    ):
+
+        with (
+            self.lock,
+            sqlite3.connect(
+                self.path,
+                timeout=5
+            ) as db
+        ):
+
+            db.execute(
+                "PRAGMA busy_timeout=5000"
+            )
+
+
+            old = db.execute(
+                """
+                SELECT
+                    sent,
+                    streak,
+                    trap,
+                    priority
+                FROM state
+                WHERE symbol=?
+                """,
+                (symbol,)
+            ).fetchone()
+
+
+            sent_time = (
+                time.time()
+                if sent is not None
+                else (
+                    old[0]
+                    if old
+                    else 0
+                )
+            )
+
+
+            old_streak = (
+                old[1]
+                if old
+                else 0
+            )
+
+            old_trap = (
+                old[2]
+                if old
+                else 0
+            )
+
+            old_priority = (
+                old[3]
+                if old
+                else 0
+            )
+
+
+            final_streak = (
+                streak
+                if streak is not None
+                else old_streak
+            )
+
+            final_trap = (
+                int(trap)
+                if trap is not None
+                else int(old_trap)
+            )
+
+            final_priority = (
+                priority
+                if priority is not None
+                else old_priority
+            )
+
+
+            db.execute(
+                """
+                INSERT INTO state(
+                    symbol,
+                    sent,
+                    score,
+                    level,
+                    stage,
+                    updated,
+                    streak,
+                    streak_at,
+                    trap,
+                    priority
+                )
+                VALUES(
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?
+                )
+
+                ON CONFLICT(symbol)
+                DO UPDATE SET
+                    sent=excluded.sent,
+                    score=excluded.score,
+                    level=excluded.level,
+                    stage=excluded.stage,
+                    updated=excluded.updated,
+                    streak=excluded.streak,
+                    streak_at=excluded.streak_at,
+                    trap=excluded.trap,
+                    priority=excluded.priority
+                """,
+                (
+                    symbol,
+                    sent_time,
+                    score,
+                    level,
+                    stage,
+                    time.time(),
+                    final_streak,
+                    time.time(),
+                    final_trap,
+                    final_priority
+                )
+            )
+
+
+    # =====================================================
+    # STREAK GÜNCELLEME
+    #
+    # Aynı aday art arda güçlü görünüyorsa streak artar.
+    #
+    # Aradaki süre STREAK_WINDOW'u aşarsa streak sıfırlanır.
+    # =====================================================
+
+    def update_streak(
+        self,
+        symbol,
+        qualified,
+        trap=False
+    ):
+
+        now = time.time()
+
+
+        with (
+            self.lock,
+            sqlite3.connect(
+                self.path,
+                timeout=5
+            ) as db
+        ):
+
+            db.execute(
+                "PRAGMA busy_timeout=5000"
+            )
+
+
+            row = db.execute(
+                """
+                SELECT
+                    streak,
+                    streak_at
+                FROM state
+                WHERE symbol=?
+                """,
+                (symbol,)
+            ).fetchone()
+
+
+            if row:
+
+                old_streak = int(
+                    row[0] or 0
+                )
+
+                old_time = float(
+                    row[1] or 0
+                )
+
+            else:
+
+                old_streak = 0
+                old_time = 0
+
+
+            if not qualified:
+
+                new_streak = 0
+
+            elif (
+                old_time > 0
+                and
+                now - old_time
+                <=
+                STREAK_WINDOW
+            ):
+
+                new_streak = (
+                    old_streak + 1
+                )
+
+            else:
+
+                new_streak = 1
+
+
+            db.execute(
+                """
+                INSERT INTO state(
+                    symbol,
+                    streak,
+                    streak_at,
+                    trap,
+                    updated
+                )
+                VALUES(
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?
+                )
+
+                ON CONFLICT(symbol)
+                DO UPDATE SET
+                    streak=excluded.streak,
+                    streak_at=excluded.streak_at,
+                    trap=excluded.trap,
+                    updated=excluded.updated
+                """,
+                (
+                    symbol,
+                    new_streak,
+                    now,
+                    int(trap),
+                    now
+                )
+            )
+
+
+            return new_streak
+
+
+    # =====================================================
+    # CAN SEND
+    # =====================================================
+
+    def can_send(
+        self,
+        symbol,
+        level
+    ):
+
+        row = self.get(
+            symbol
+        )
+
+        if not row:
+
+            return True
+
+
+        previous_sent = float(
+            row[0] or 0
+        )
+
+        previous_level = row[2]
+
+
+        rank = {
+            "BUY": 1,
+            "VERY": 2
+        }
+
+
+        old_rank = rank.get(
+            previous_level,
+            0
+        )
+
+        new_rank = rank.get(
+            level,
+            0
+        )
+
+
+        return (
+            time.time()
+            -
+            previous_sent
+            >=
+            COOLDOWN
+        ) or (
+            new_rank > old_rank
+        )
+
+
+    # =====================================================
+    # SIGNAL KAYDI
+    # =====================================================
+
+    def create_signal(
+        self,
+        result
+    ):
+
+        with (
+            self.lock,
+            sqlite3.connect(
+                self.path,
+                timeout=5
+            ) as db
+        ):
+
+            db.execute(
+                "PRAGMA busy_timeout=5000"
+            )
+
+
+            cur = db.execute(
+                """
+                INSERT INTO signals(
+                    symbol,
+                    ts,
+                    price,
+                    score,
+                    setup,
+                    confirmation,
+                    penalty,
+                    status,
+
+                    max_pct,
+                    min_pct,
+
+                    entry_quality,
+                    priority,
+
+                    d30,
+                    d90,
+
+                    trade_1m,
+                    trade_5m,
+
+                    market_momentum,
+
+                    trap
+                )
+                VALUES(
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    0,
+                    0,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?
+                )
+                """,
+                (
+                    result["symbol"],
+                    time.time(),
+                    result["price"],
+                    result["score"],
+                    result["setup"],
+                    result["confirmation"],
+                    result["penalty"],
+                    result["status"],
+
+                    result.get(
+                        "entry_quality",
+                        0
+                    ),
+
+                    result.get(
+                        "priority",
+                        0
+                    ),
+
+                    result.get(
+                        "d30",
+                        0
+                    ),
+
+                    result.get(
+                        "d90",
+                        0
+                    ),
+
+                    result.get(
+                        "trades_1m",
+                        0
+                    ),
+
+                    result.get(
+                        "trades_5m",
+                        0
+                    ),
+
+                    result.get(
+                        "market_momentum",
+                        0
+                    ),
+
+                    int(
+                        result.get(
+                            "trap",
+                            False
+                        )
+                    )
+                )
+            )
+
+
+            return cur.lastrowid
+
+
+    # =====================================================
+    # OUTCOME GÜNCELLEME
+    # =====================================================
+
+    def update_outcomes(
+        self,
+        price_map
+    ):
+
+        now = time.time()
+
+
+        with (
+            self.lock,
+            sqlite3.connect(
+                self.path,
+                timeout=5
+            ) as db
+        ):
+
+            db.execute(
+                "PRAGMA busy_timeout=5000"
+            )
+
+
+            rows = db.execute(
+                """
+                SELECT
+                    id,
+                    symbol,
+                    ts,
+                    price,
+                    max_pct,
+                    min_pct,
+                    c1,
+                    c3,
+                    c5,
+                    c15
+                FROM signals
+                WHERE ts > ?
+                """,
+                (
+                    now - OUTCOME_WINDOW,
+                )
+            ).fetchall()
+
+
+            for (
+                id_,
+                symbol,
+                ts,
+                price,
+                max_pct,
+                min_pct,
+                c1,
+                c3,
+                c5,
+                c15
+            ) in rows:
+
+
+                cur_price = price_map.get(
+                    symbol
+                )
+
+
+                if (
+                    not cur_price
+                    or
+                    not price
+                    or
+                    price <= 0
+                ):
+
+                    continue
+
+
+                change = (
+                    (
+                        cur_price
+                        -
+                        price
+                    )
+                    /
+                    price
+                    *
+                    100
+                )
+
+
+                new_max = max(
+                    max_pct,
+                    change
+                )
+
+                new_min = min(
+                    min_pct,
+                    change
+                )
+
+
+                elapsed = (
+                    now - ts
+                )
+
+
+                updates = {
+                    "max_pct": new_max,
+                    "min_pct": new_min
+                }
+
+
+                if (
+                    elapsed >= 60
+                    and
+                    c1 is None
+                ):
+
+                    updates[
+                        "c1"
+                    ] = change
+
+
+                if (
+                    elapsed >= 180
+                    and
+                    c3 is None
+                ):
+
+                    updates[
+                        "c3"
+                    ] = change
+
+
+                if (
+                    elapsed >= 300
+                    and
+                    c5 is None
+                ):
+
+                    updates[
+                        "c5"
+                    ] = change
+
+
+                if (
+                    elapsed >= 900
+                    and
+                    c15 is None
+                ):
+
+                    updates[
+                        "c15"
+                    ] = change
+
+
+                set_clause = ", ".join(
+                    f"{key}=?"
+                    for key in updates
+                )
+
+
+                db.execute(
+                    f"""
+                    UPDATE signals
+                    SET {set_clause}
+                    WHERE id=?
+                    """,
+                    (
+                        *updates.values(),
+                        id_
+                    )
+                )
+
+
+    # =====================================================
+    # GELİŞMİŞ PERFORMANS VERİSİ
+    # =====================================================
+
+    def performance_summary(
+        self
+    ):
+
+        with (
+            self.lock,
+            sqlite3.connect(
+                self.path,
+                timeout=5
+            ) as db
+        ):
+
+            db.execute(
+                "PRAGMA busy_timeout=5000"
+            )
+
+
+            return db.execute(
+                """
+                SELECT
+                    score,
+                    setup,
+                  

@@ -3912,3 +3912,974 @@ return {
             "symbol": symbol
 }
        
+# =========================================================
+# V22 | ÖNCELİK PUANI
+#
+# score = teknik güç
+# entry_quality = girişin ne kadar sağlıklı olduğu
+# trade_conf = işlem katılımı güveni
+# streak = süreklilik
+#
+# priority = bütün bunların birleşimi
+# =========================================================
+
+def calculate_priority(result):
+
+    score = float(
+        result.get(
+            "score",
+            0
+        )
+    )
+
+    entry_quality = float(
+        result.get(
+            "entry_quality",
+            0
+        )
+    )
+
+    trade_conf = float(
+        result.get(
+            "trade_conf",
+            0
+        )
+    )
+
+    streak = int(
+        result.get(
+            "streak",
+            0
+        )
+    )
+
+    buyer_percent = float(
+        result.get(
+            "bp",
+            50
+        )
+    )
+
+    volume_ratio = float(
+        result.get(
+            "vr",
+            0
+        )
+    )
+
+    volume5_ratio = float(
+        result.get(
+            "vr5",
+            0
+        )
+    )
+
+    breakout = bool(
+        result.get(
+            "breakout",
+            False
+        )
+    )
+
+    closed_breakout = bool(
+        result.get(
+            "closed_breakout",
+            False
+        )
+    )
+
+    trap = bool(
+        result.get(
+            "trap",
+            False
+        )
+    )
+
+    d30 = float(
+        result.get(
+            "d30",
+            0
+        )
+    )
+
+    d90 = float(
+        result.get(
+            "d90",
+            0
+        )
+    )
+
+
+    # -----------------------------------------------------
+    # Başlangıç
+    # -----------------------------------------------------
+
+    priority = (
+        score * 0.50
+        +
+        entry_quality * 0.25
+        +
+        trade_conf * 100 * 0.10
+    )
+
+
+    # -----------------------------------------------------
+    # Süreklilik
+    # -----------------------------------------------------
+
+    if streak >= 3:
+
+        priority += 8
+
+    elif streak >= 2:
+
+        priority += 4
+
+
+    # -----------------------------------------------------
+    # Gerçek kırılım
+    # -----------------------------------------------------
+
+    if closed_breakout:
+
+        priority += 8
+
+    elif breakout:
+
+        priority += 4
+
+
+    # -----------------------------------------------------
+    # Alıcı baskısı
+    # -----------------------------------------------------
+
+    if buyer_percent >= 75:
+
+        priority += 5
+
+    elif buyer_percent >= 65:
+
+        priority += 3
+
+
+    # -----------------------------------------------------
+    # Hacim
+    # -----------------------------------------------------
+
+    if volume_ratio >= 3:
+
+        priority += 5
+
+    elif volume_ratio >= 2:
+
+        priority += 3
+
+    elif volume_ratio >= 1.5:
+
+        priority += 1
+
+
+    if volume5_ratio >= 2:
+
+        priority += 4
+
+    elif volume5_ratio >= 1.5:
+
+        priority += 2
+
+
+    # -----------------------------------------------------
+    # Uzun vadeli düşüş
+    #
+    # Sert düşüşteki coin tamamen yasaklanmıyor.
+    # Fakat aynı teknik güce sahip daha sağlıklı
+    # coinler öne geçiriliyor.
+    # -----------------------------------------------------
+
+    if d90 <= LT90_EXTREME:
+
+        priority -= 12
+
+    elif d90 <= LT90_STRONG:
+
+        priority -= 8
+
+    elif d90 <= LT90_MILD:
+
+        priority -= 4
+
+
+    if d30 <= LT30_STRONG:
+
+        priority -= 6
+
+    elif d30 <= LT30_MILD:
+
+        priority -= 3
+
+
+    # -----------------------------------------------------
+    # TRAP
+    # -----------------------------------------------------
+
+    if trap:
+
+        priority -= 25
+
+
+    return max(
+        0,
+        min(
+            100,
+            round(
+                priority,
+                1
+            )
+        )
+    )
+
+
+# =========================================================
+# V22 | SİNYAL SIRALAMA
+# =========================================================
+
+def rank_signals(
+    signals
+):
+
+    for result in signals:
+
+        result["priority"] = (
+            calculate_priority(
+                result
+            )
+        )
+
+
+    signals.sort(
+        key=lambda x: (
+            x.get(
+                "priority",
+                0
+            ),
+            x.get(
+                "entry_quality",
+                0
+            ),
+            x.get(
+                "score",
+                0
+            ),
+            x.get(
+                "confirmation",
+                0
+            )
+        ),
+        reverse=True
+    )
+
+
+    for index, result in enumerate(
+        signals,
+        start=1
+    ):
+
+        result["rank"] = index
+
+
+    return signals
+
+
+# =========================================================
+# V22 | TELEGRAM MESAJI
+# =========================================================
+
+def message(result):
+
+    if result["status"] == "VERY":
+
+        title = (
+            "🔥 ÇOK GÜÇLÜ AL"
+        )
+
+    else:
+
+        title = (
+            "🟢 AL"
+        )
+
+
+    reasons = []
+
+
+    # -----------------------------------------------------
+    # Kırılım
+    # -----------------------------------------------------
+
+    if result.get(
+        "closed_breakout",
+        False
+    ):
+
+        reasons.append(
+            "Kapanış kırılımı"
+        )
+
+    elif result.get(
+        "breakout",
+        False
+    ):
+
+        reasons.append(
+            "Direnç kırıldı"
+        )
+
+    elif result.get(
+        "dist",
+        99
+    ) <= 0.35:
+
+        reasons.append(
+            (
+                f"Direnç "
+                f"%{result['dist']:.2f}"
+            )
+        )
+
+
+    # -----------------------------------------------------
+    # Hacim
+    # -----------------------------------------------------
+
+    if result.get(
+        "vr",
+        0
+    ) >= 1.5:
+
+        reasons.append(
+            (
+                f"1m hacim "
+                f"{result['vr']:.1f}x"
+            )
+        )
+
+
+    if result.get(
+        "vr5",
+        0
+    ) >= 1.5:
+
+        reasons.append(
+            (
+                f"5m hacim "
+                f"{result['vr5']:.1f}x"
+            )
+        )
+
+
+    if result.get(
+        "impulse",
+        0
+    ) >= 2:
+
+        reasons.append(
+            (
+                f"Hacim ivmesi "
+                f"{result['impulse']:.1f}x"
+            )
+        )
+
+
+    # -----------------------------------------------------
+    # Alıcı
+    # -----------------------------------------------------
+
+    if result.get(
+        "bp",
+        0
+    ) >= 65:
+
+        reasons.append(
+            (
+                f"Alıcı "
+                f"%{result['bp']:.0f}"
+            )
+        )
+
+
+    # -----------------------------------------------------
+    # EMA
+    # -----------------------------------------------------
+
+    if result.get(
+        "ema",
+        False
+    ):
+
+        reasons.append(
+            "EMA trend"
+        )
+
+
+    # -----------------------------------------------------
+    # MACD
+    # -----------------------------------------------------
+
+    if result.get(
+        "macd",
+        False
+    ):
+
+        reasons.append(
+            "MACD güçleniyor"
+        )
+
+
+    # -----------------------------------------------------
+    # Higher Low
+    # -----------------------------------------------------
+
+    if result.get(
+        "hl",
+        False
+    ):
+
+        reasons.append(
+            "Higher-Low"
+        )
+
+
+    # -----------------------------------------------------
+    # Squeeze
+    # -----------------------------------------------------
+
+    if result.get(
+        "squeeze",
+        False
+    ):
+
+        reasons.append(
+            "BB sıkışma"
+        )
+
+
+    # -----------------------------------------------------
+    # Trade count
+    # -----------------------------------------------------
+
+    if result.get(
+        "trade_status"
+    ) == "YÜKSEK KATILIM":
+
+        reasons.append(
+            "Yüksek işlem katılımı"
+        )
+
+    elif result.get(
+        "trade_status"
+    ) == "DÜŞÜK KATILIM":
+
+        reasons.append(
+            "⚠️ Düşük işlem katılımı"
+        )
+
+
+    # -----------------------------------------------------
+    # Uzun vadeli trend
+    # -----------------------------------------------------
+
+    trend_state = result.get(
+        "trend_state",
+        "VERİ YOK"
+    )
+
+
+    if trend_state == "POZİTİF TREND":
+
+        reasons.append(
+            "Uzun trend pozitif"
+        )
+
+    elif trend_state == "DÜŞÜŞ RİSKİ":
+
+        reasons.append(
+            "⚠️ Uzun trend zayıf"
+        )
+
+    elif trend_state == "YÜKSEK DÜŞÜŞ RİSKİ":
+
+        reasons.append(
+            "⚠️ Uzun düşüş riski"
+        )
+
+
+    # -----------------------------------------------------
+    # Market
+    # -----------------------------------------------------
+
+    market_state = result.get(
+        "market_state",
+        "VERİ YOK"
+    )
+
+
+    if market_state == "NÖTR":
+
+        reasons.append(
+            "BTC sakin"
+        )
+
+    elif market_state == "AŞIRI HAREKETLİ":
+
+        reasons.append(
+            "⚠️ BTC çok hareketli"
+        )
+
+
+    # -----------------------------------------------------
+    # Mesaj
+    # -----------------------------------------------------
+
+    trap_line = ""
+
+
+    if result.get(
+        "trap",
+        False
+    ):
+
+        trap_reasons = result.get(
+            "trap_reasons",
+            []
+        )
+
+
+        trap_text = (
+            ", ".join(
+                trap_reasons
+            )
+            if trap_reasons
+            else
+            "risk koşulu"
+        )
+
+
+        trap_line = (
+            "\n⚠️ TUZAK RİSKİ: "
+            f"{trap_text}\n"
+        )
+
+
+    rank = result.get(
+        "rank"
+    )
+
+
+    if rank:
+
+        rank_text = (
+            f"🏆 Öncelik: #{rank}"
+        )
+
+    else:
+
+        rank_text = (
+            "🏆 Öncelik: hesaplanıyor"
+        )
+
+
+    streak = result.get(
+        "streak",
+        0
+    )
+
+
+    d30 = result.get(
+        "d30",
+        0
+    )
+
+
+    d90 = result.get(
+        "d90",
+        0
+    )
+
+
+    return (
+        "🐋 BALİNA RADARI V22\n\n"
+
+        f"{title}\n\n"
+
+        f"🪙 #{result['symbol']}\n"
+
+        f"💰 {result['price']:.8g}\n"
+
+        f"💪 Güç: "
+        f"{result['score']}/100\n"
+
+        f"🏆 Öncelik: "
+        f"{result.get('priority', 0):.0f}/100\n"
+
+        f"🎯 Giriş kalitesi: "
+        f"{result.get('entry_quality', 0):.0f}/100\n"
+
+        f"🔁 Teyit: "
+        f"{streak}x\n\n"
+
+        f"📊 1m Hacim: "
+        f"{result['vr']:.2f}x | "
+        f"5m: "
+        f"{result['vr5']:.2f}x\n"
+
+        f"🚀 İvme: "
+        f"{result.get('impulse', 0):.2f}x\n"
+
+        f"🛒 Alıcı: "
+        f"%{result['bp']:.0f}\n"
+
+        f"🔢 İşlem: "
+        f"{result.get('trades_1m', 0)} "
+        f"({result.get('trade_status', 'VERİ YOK')})\n"
+
+        f"📈 RSI: "
+        f"{result['rv']:.0f} | "
+        f"ADX: "
+        f"{result['ad']:.0f}\n"
+
+        f"🎯 Direnç: "
+        f"%{result['dist']:.2f}\n"
+
+        f"🚀 Kırılım: "
+        f"{'✅' if result.get('breakout') else '⏳'}\n"
+
+        f"📅 30g: "
+        f"{d30:+.1f}% | "
+        f"90g: "
+        f"{d90:+.1f}%\n"
+
+        f"🌐 BTC/TRY 15m: "
+        f"{result.get('market_momentum', 0):+.2f}%\n"
+
+        f"{trap_line}\n"
+
+        f"🔎 "
+        f"{' • '.join(reasons[:8])}\n\n"
+
+        f"{rank_text}\n\n"
+
+        +
+        (
+            "🚀 Güçlü teyit."
+            if result["status"] == "VERY"
+            else
+            "🎯 Alım teyidi oluştu."
+        )
+    )
+
+
+# =========================================================
+# V22 | TARAMA
+# =========================================================
+
+def scan():
+
+    start = time.time()
+
+
+    # =====================================================
+    # 1) TICKER
+    # =====================================================
+
+    data = tickers()
+
+
+    if not data:
+
+        return True
+
+
+    # =====================================================
+    # 2) OUTCOME GÜNCELLEME
+    #
+    # Yeni API isteği yok.
+    # Zaten çekilmiş ticker verisini kullanıyoruz.
+    # =====================================================
+
+    price_map = {}
+
+
+    for item in data:
+
+        try:
+
+            symbol = item.get(
+                "symbol"
+            )
+
+            price_map[symbol] = float(
+                item.get(
+                    "lastPrice",
+                    0
+                )
+            )
+
+        except (
+            TypeError,
+            ValueError
+        ):
+
+            continue
+
+
+    DBS.update_outcomes(
+        price_map
+    )
+
+
+    # =====================================================
+    # 3) ADAYLAR
+    # =====================================================
+
+    all_candidates = candidates(
+        data
+    )
+
+
+    symbols = shortlist(
+        all_candidates
+    )
+
+
+    signals = []
+
+    stats = {}
+
+
+    # =====================================================
+    # 4) PARALEL ANALİZ
+    # =====================================================
+
+    with ThreadPoolExecutor(
+        max_workers=WORKERS
+    ) as executor:
+
+
+        jobs = [
+            executor.submit(
+                analyze,
+                item
+            )
+            for item in symbols
+        ]
+
+
+        for job in as_completed(
+            jobs
+        ):
+
+            try:
+
+                result = job.result()
+
+            except Exception as e:
+
+                log.error(
+                    "Analyze job: %s",
+                    e
+                )
+
+                result = {
+                    "status": "error"
+                }
+
+
+            status = result.get(
+                "status",
+                "error"
+            )
+
+
+            stats[status] = (
+                stats.get(
+                    status,
+                    0
+                )
+                +
+                1
+            )
+
+
+            if status in (
+                "BUY",
+                "VERY"
+            ):
+
+                signals.append(
+                    result
+                )
+
+
+    # =====================================================
+    # 5) ÖNCELİK SIRALAMASI
+    # =====================================================
+
+    signals = rank_signals(
+        signals
+    )
+
+
+    # =====================================================
+    # 6) SADECE EN İYİLERİ GÖNDER
+    # =====================================================
+
+    sent = 0
+
+
+    for result in signals[
+        :TOP_PRIORITY_COUNT
+    ]:
+
+
+        if sent >= MAX_SIGNALS:
+
+            break
+
+
+        if result.get(
+            "priority",
+            0
+        ) < PRIORITY_MIN_SCORE:
+
+            continue
+
+
+        if not DBS.can_send(
+            result["symbol"],
+            result["status"]
+        ):
+
+            continue
+
+
+        # -------------------------------------------------
+        # Telegram
+        # -------------------------------------------------
+
+        if telegram(
+            message(result)
+        ):
+
+
+            # ---------------------------------------------
+            # Gönderim state'i
+            # ---------------------------------------------
+
+            DBS.put(
+                result["symbol"],
+                result["score"],
+                result["status"],
+                result["status"],
+                sent=time.time(),
+                streak=result.get(
+                    "streak",
+                    0
+                ),
+                trap=result.get(
+                    "trap",
+                    False
+                ),
+                priority=result.get(
+                    "priority",
+                    0
+                )
+            )
+
+
+            # ---------------------------------------------
+            # Sonuç kaydı
+            # ---------------------------------------------
+
+            DBS.create_signal(
+                result
+            )
+
+
+            sent += 1
+
+
+        time.sleep(
+            0.3
+        )
+
+
+    # =====================================================
+    # 7) LOG
+    # =====================================================
+
+    elapsed = (
+        time.time()
+        -
+        start
+    )
+
+
+    errors = stats.get(
+        "error",
+        0
+    )
+
+
+    log.info(
+        (
+            "V22 | TRY:%d/%d | "
+            "AL:%d | VERY:%d | "
+            "SETUP:%d | Hata:%d | "
+            "Gonder:%d | %.1fs"
+        ),
+
+        len(symbols),
+
+        len(all_candidates),
+
+        stats.get(
+            "BUY",
+            0
+        ),
+
+        stats.get(
+            "VERY",
+            0
+        ),
+
+        stats.get(
+            "INTERNAL",
+            0
+        ),
+
+        errors,
+
+        sent,
+
+        elapsed
+    )
+
+
+    # =====================================================
+    # 8) BACKOFF
+    # =====================================================
+
+    return (
+        errors
+        /
+        max(
+            1,
+            len(symbols)
+        )
+        >
+        0.30
+        or
+        elapsed
+        >
+        SCAN_INTERVAL * 1.25
+)

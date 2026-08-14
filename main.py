@@ -2507,3 +2507,19 @@ continue
 
             price = float(
                 ticker.get(
+"lastPrice",
+                    0
+                )
+            )
+
+
+            if (
+                quote_volume
+                <
+                MIN_QUOTE_VOLUME
+            ):
+
+                continue
+
+
+            # Aşırı günlük yükselişi kovalamıyoruz.

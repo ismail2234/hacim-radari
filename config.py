@@ -88,36 +88,4 @@ class Settings:
 
     # /performance gibi iç endpoint'leri korumak için basit paylaşılan anahtar.
     # Boş bırakılırsa (varsayılan DEĞİL, bilinçli olarak) endpoint korumasız kalır
-    # ve bunu loop() başlangıcında uyarı olarak loglarız.
-    admin_token: str = field(default_factory=lambda: _env_str("ADMIN_TOKEN", ""))
-
-    excluded_symbols: frozenset = field(default_factory=lambda: frozenset({
-        "USDTTRY", "USDCUSDT", "FDUSDUSDT", "TUSDUSDT", "BUSDUSDT", "DAIUSDT",
-    }))
-
-    def validate(self) -> None:
-        problems = []
-
-        if self.workers < 1:
-            problems.append("MAX_WORKERS >= 1 olmalı")
-        if self.shortlist_size < 1:
-            problems.append("SHORTLIST_SIZE >= 1 olmalı")
-        if self.scan_interval < 5:
-            problems.append("SCAN_INTERVAL çok düşük (>=5 önerilir)")
-        if self.max_signals < 1:
-            problems.append("MAX_SIGNALS_PER_SCAN >= 1 olmalı")
-        if self.request_timeout < 1:
-            problems.append("REQUEST_TIMEOUT >= 1 olmalı")
-        if not (0 < self.min_priority <= 100):
-            problems.append("MIN_PRIORITY 0-100 arasında olmalı")
-        if self.weight_budget_per_minute < 100:
-            problems.append("WEIGHT_BUDGET_PER_MINUTE çok düşük, tarama hiç ilerlemez")
-
-        if problems:
-            raise ValueError(
-                "Konfigürasyon hatası:\n- " + "\n- ".join(problems)
-            )
-
-
-SETTINGS = Settings()
-  
+    # ve bunu loop() başlangıcında

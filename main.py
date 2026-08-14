@@ -651,3 +651,474 @@ def market_context():
         )
 
     return result
+class DB:
+
+    def __init__(self, path):
+        self.path = path
+        self.lock = Lock()
+
+        with sqlite3.connect(path) as db:
+            db.execute("PRAGMA journal_mode=WAL")
+            db.execute("PRAGMA synchronous=NORMAL")
+            db.execute("PRAGMA busy_timeout=5000")
+
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS state(
+                    symbol TEXT PRIMARY KEY,
+                    sent REAL DEFAULT 0,
+                    score REAL DEFAULT 0,
+                    level TEXT DEFAULT 'NONE',
+                    stage TEXT DEFAULT 'NONE',
+                    updated REAL DEFAULT 0,
+                    streak INTEGER DEFAULT 0,
+                    streak_at REAL DEFAULT 0,
+                    trap INTEGER DEFAULT 0,
+                    priority REAL DEFAULT 0
+                )
+            """)
+
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS signals(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol TEXT,
+                    ts REAL,
+                    price REAL,
+                    score REAL,
+                    setup REAL,
+                    confirmation REAL,
+                    penalty REAL,
+                    status TEXT,
+                    max_pct REAL DEFAULT 0,
+                    min_pct REAL DEFAULT 0,
+                    c1 REAL,
+                    c3 REAL,
+                    c5 REAL,
+                    c15 REAL,
+                    entry_quality REAL DEFAULT 0,
+                    priority REAL DEFAULT 0,
+                    d30 REAL DEFAULT 0,
+                    d90 REAL DEFAULT 0,
+                    trade_1m REAL DEFAULT 0,
+                    trade_5m REAL DEFAULT 0,
+                    market_momentum REAL DEFAULT 0,
+                    trap INTEGER DEFAULT 0
+                )
+            """)
+
+            self._migrate(db, "state", {
+                "streak":
+                    "ALTER TABLE state ADD COLUMN streak INTEGER DEFAULT 0",
+                "streak_at":
+                    "ALTER TABLE state ADD COLUMN streak_at REAL DEFAULT 0",
+                "trap":
+                    "ALTER TABLE state ADD COLUMN trap INTEGER DEFAULT 0",
+                "priority":
+                    "ALTER TABLE state ADD COLUMN priority REAL DEFAULT 0"
+            })
+
+            self._migrate(db, "signals", {
+                "entry_quality":
+                    "ALTER TABLE signals ADD COLUMN entry_quality REAL DEFAULT 0",
+                "priority":
+                    "ALTER TABLE signals ADD COLUMN priority REAL DEFAULT 0",
+                "d30":
+                    "ALTER TABLE signals ADD COLUMN d30 REAL DEFAULT 0",
+                "d90":
+                    "ALTER TABLE signals ADD COLUMN d90 REAL DEFAULT 0",
+                "trade_1m":
+                    "ALTER TABLE signals ADD COLUMN trade_1m REAL DEFAULT 0",
+                "trade_5m":
+                    "ALTER TABLE signals ADD COLUMN trade_5m REAL DEFAULT 0",
+                "market_momentum":
+                    "ALTER TABLE signals ADD COLUMN market_momentum REAL DEFAULT 0",
+                "trap":
+                    "ALTER TABLE signals ADD COLUMN trap INTEGER DEFAULT 0"
+            })
+
+    def _migrate(self, db, table, columns):
+        existing = {
+            row[1]
+            for row in db.execute(
+                f"PRAGMA table_info({table})"
+            ).fetchall()
+        }
+
+        for name, sql in columns.items():
+            if name not in existing:
+                db.execute(sql)
+
+    def get(self, symbol):
+        with (
+            self.lock,
+            sqlite3.connect(
+                self.path,
+                timeout=5
+            ) as db
+        ):
+            db.execute(
+                "PRAGMA busy_timeout=5000"
+            )
+
+            return db.execute("""
+                SELECT sent, score, level, stage,
+                       updated, streak, streak_at,
+                       trap, priority
+                FROM state
+                WHERE symbol=?
+            """, (symbol,)).fetchone()
+
+    def put(
+        self,
+        symbol,
+        score,
+        level,
+        stage,
+        sent=None,
+        streak=None,
+        trap=None,
+        priority=None
+    ):
+        with (
+            self.lock,
+            sqlite3.connect(
+                self.path,
+                timeout=5
+            ) as db
+        ):
+            db.execute(
+                "PRAGMA busy_timeout=5000"
+            )
+
+            old = db.execute("""
+                SELECT sent, streak, trap, priority
+                FROM state
+                WHERE symbol=?
+            """, (symbol,)).fetchone()
+
+            sent_time = (
+                time.time()
+                if sent is not None
+                else old[0] if old else 0
+            )
+
+            old_streak = old[1] if old else 0
+            old_trap = old[2] if old else 0
+            old_priority = old[3] if old else 0
+
+            db.execute("""
+                INSERT INTO state(
+                    symbol, sent, score, level, stage,
+                    updated, streak, streak_at,
+                    trap, priority
+                )
+                VALUES(?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(symbol)
+                DO UPDATE SET
+                    sent=excluded.sent,
+                    score=excluded.score,
+                    level=excluded.level,
+                    stage=excluded.stage,
+                    updated=excluded.updated,
+                    streak=excluded.streak,
+                    streak_at=excluded.streak_at,
+                    trap=excluded.trap,
+                    priority=excluded.priority
+            """, (
+                symbol,
+                sent_time,
+                score,
+                level,
+                stage,
+                time.time(),
+                old_streak if streak is None else streak,
+                time.time(),
+                old_trap if trap is None else int(trap),
+                old_priority if priority is None else priority
+            ))
+
+    def update_streak(
+        self,
+        symbol,
+        qualified,
+        trap=False
+    ):
+        now = time.time()
+
+        with (
+            self.lock,
+            sqlite3.connect(
+                self.path,
+                timeout=5
+            ) as db
+        ):
+            db.execute(
+                "PRAGMA busy_timeout=5000"
+            )
+
+            row = db.execute("""
+                SELECT streak, streak_at
+                FROM state
+                WHERE symbol=?
+            """, (symbol,)).fetchone()
+
+            old_streak = int(row[0] or 0) if row else 0
+            old_time = float(row[1] or 0) if row else 0
+
+            if not qualified:
+                streak = 0
+            elif (
+                old_time
+                and now - old_time <= STREAK_WINDOW
+            ):
+                streak = old_streak + 1
+            else:
+                streak = 1
+
+            db.execute("""
+                INSERT INTO state(
+                    symbol, streak, streak_at,
+                    trap, updated
+                )
+                VALUES(?,?,?,?,?)
+                ON CONFLICT(symbol)
+                DO UPDATE SET
+                    streak=excluded.streak,
+                    streak_at=excluded.streak_at,
+                    trap=excluded.trap,
+                    updated=excluded.updated
+            """, (
+                symbol,
+                streak,
+                now,
+                int(trap),
+                now
+            ))
+
+            return streak
+
+    def can_send(self, symbol, level):
+        row = self.get(symbol)
+
+        if not row:
+            return True
+
+        sent = float(row[0] or 0)
+        old_level = row[2]
+
+        rank = {
+            "BUY": 1,
+            "VERY": 2
+        }
+
+        return (
+            time.time() - sent >= COOLDOWN
+            or
+            rank.get(level, 0)
+            > rank.get(old_level, 0)
+        )
+
+    def create_signal(self, r):
+        with (
+            self.lock,
+            sqlite3.connect(
+                self.path,
+                timeout=5
+            ) as db
+        ):
+            db.execute(
+                "PRAGMA busy_timeout=5000"
+            )
+
+            cur = db.execute("""
+                INSERT INTO signals(
+                    symbol, ts, price, score,
+                    setup, confirmation, penalty,
+                    status, entry_quality,
+                    priority, d30, d90,
+                    trade_1m, trade_5m,
+                    market_momentum, trap
+                )
+                VALUES(
+                    ?,?,?,?,?,?,?,?,
+                    ?,?,?,?,?,?,?,?
+                )
+            """, (
+                r["symbol"],
+                time.time(),
+                r["price"],
+                r["score"],
+                r["setup"],
+                r["confirmation"],
+                r["penalty"],
+                r["status"],
+                r.get("entry_quality", 0),
+                r.get("priority", 0),
+                r.get("d30", 0),
+                r.get("d90", 0),
+                r.get("trades_1m", 0),
+                r.get("trades_5m", 0),
+                r.get("market_momentum", 0),
+                int(r.get("trap", False))
+            ))
+
+            return cur.lastrowid
+
+    def update_outcomes(self, price_map):
+        now = time.time()
+
+        with (
+            self.lock,
+            sqlite3.connect(
+                self.path,
+                timeout=5
+            ) as db
+        ):
+            db.execute(
+                "PRAGMA busy_timeout=5000"
+            )
+
+            rows = db.execute("""
+                SELECT id, symbol, ts, price,
+                       max_pct, min_pct,
+                       c1, c3, c5, c15
+                FROM signals
+                WHERE ts > ?
+            """, (
+                now - OUTCOME_WINDOW,
+            )).fetchall()
+
+            for row in rows:
+                (
+                    sid, symbol, ts, price,
+                    max_pct, min_pct,
+                    c1, c3, c5, c15
+                ) = row
+
+                current = price_map.get(symbol)
+
+                if (
+                    not current
+                    or not price
+                    or price <= 0
+                ):
+                    continue
+
+                change = (
+                    (current - price)
+                    / price
+                    * 100
+                )
+
+                updates = {
+                    "max_pct": max(max_pct, change),
+                    "min_pct": min(min_pct, change)
+                }
+
+                elapsed = now - ts
+
+                if elapsed >= 60 and c1 is None:
+                    updates["c1"] = change
+
+                if elapsed >= 180 and c3 is None:
+                    updates["c3"] = change
+
+                if elapsed >= 300 and c5 is None:
+                    updates["c5"] = change
+
+                if elapsed >= 900 and c15 is None:
+                    updates["c15"] = change
+
+                clause = ", ".join(
+                    f"{k}=?"
+                    for k in updates
+                )
+
+                db.execute(
+                    f"UPDATE signals SET {clause} WHERE id=?",
+                    (*updates.values(), sid)
+                )
+
+    def performance_summary(self):
+        with (
+            self.lock,
+            sqlite3.connect(
+                self.path,
+                timeout=5
+            ) as db
+        ):
+            return db.execute("""
+                SELECT
+                    score, setup, confirmation,
+                    max_pct, min_pct, c5, c15,
+                    status, entry_quality, priority,
+                    d30, d90, trade_1m, trade_5m,
+                    market_momentum, trap
+                FROM signals
+                WHERE c15 IS NOT NULL
+            """).fetchall()
+
+
+DBS = DB(DB_PATH)
+
+
+def candidates(data):
+    result = []
+
+    for ticker in data:
+        symbol = ticker.get("symbol", "")
+
+        if not symbol.endswith("TRY"):
+            continue
+
+        if symbol in EXCLUDED:
+            continue
+
+        try:
+            volume = float(
+                ticker.get("quoteVolume", 0)
+            )
+
+            change = float(
+                ticker.get("priceChangePercent", 0)
+            )
+
+            price = float(
+                ticker.get("lastPrice", 0)
+            )
+
+            if volume < MIN_QUOTE_VOLUME:
+                continue
+
+            if change > 25:
+                continue
+
+            result.append({
+                "symbol": symbol,
+                "volume": volume,
+                "chg": change,
+                "price": price
+            })
+
+        except (TypeError, ValueError):
+            continue
+
+    return result
+
+
+def shortlist(items):
+    def rank(item):
+        return (
+            item["volume"]
+            *
+            (
+                1
+                +
+                max(item["chg"], 0) / 100
+            )
+        )
+
+    return sorted(
+        items,
+        key=rank,
+        reverse=True
+    )[:SHORTLIST]

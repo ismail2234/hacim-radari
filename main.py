@@ -2479,3 +2479,31 @@ def candidates(data):
         if not symbol.endswith(
             "TRY"
         ):
+continue
+
+
+        if symbol in EXCLUDED:
+
+            continue
+
+
+        try:
+
+            quote_volume = float(
+                ticker.get(
+                    "quoteVolume",
+                    0
+                )
+            )
+
+
+            change = float(
+                ticker.get(
+                    "priceChangePercent",
+                    0
+                )
+            )
+
+
+            price = float(
+                ticker.get(

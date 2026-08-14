@@ -4,7 +4,7 @@ import sqlite3
 import logging
 import sys
 
-from threading import Lock
+from threading import Thread, Lock
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests

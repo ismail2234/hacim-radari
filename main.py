@@ -2545,3 +2545,20 @@ if change > 25:
 
 
     return result
+# =========================================================
+# SHORTLIST
+# =========================================================
+
+def shortlist(items):
+
+    def ranking(item):
+
+        volume = item[
+            "volume"
+        ]
+
+        positive_change = max(
+            item["chg"],
+            0
+        )
+

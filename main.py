@@ -670,3 +670,224 @@ class DB:
             ))
 
             return streak
+    def can_send(self, symbol, level):
+        row = self.get(symbol)
+
+        if not row:
+            return True
+
+        sent = float(row[0] or 0)
+        old_level = row[2]
+
+        rank = {
+            "BUY": 1,
+            "VERY": 2
+        }
+
+        return (
+            time.time() - sent >= COOLDOWN
+            or
+            rank.get(level, 0)
+            > rank.get(old_level, 0)
+        )
+
+    def create_signal(self, r):
+        with (
+            self.lock,
+            sqlite3.connect(self.path, timeout=5) as db
+        ):
+            db.execute("PRAGMA busy_timeout=5000")
+
+            return db.execute("""
+                INSERT INTO signals(
+                    symbol, ts, price, score,
+                    setup, confirmation, penalty,
+                    status, entry_quality,
+                    priority, d30, d90,
+                    trade_1m, trade_5m,
+                    market_momentum, trap
+                )
+                VALUES(
+                    ?,?,?,?,?,?,?,?,
+                    ?,?,?,?,?,?,?,?
+                )
+            """, (
+                r["symbol"],
+                time.time(),
+                r["price"],
+                r["score"],
+                r["setup"],
+                r["confirmation"],
+                r["penalty"],
+                r["status"],
+                r.get("entry_quality", 0),
+                r.get("priority", 0),
+                r.get("d30", 0),
+                r.get("d90", 0),
+                r.get("trades_1m", 0),
+                r.get("trades_5m", 0),
+                r.get("market_momentum", 0),
+                int(r.get("trap", False))
+            )).lastrowid
+
+    def update_outcomes(self, price_map):
+        now = time.time()
+
+        with (
+            self.lock,
+            sqlite3.connect(self.path, timeout=5) as db
+        ):
+            db.execute("PRAGMA busy_timeout=5000")
+
+            rows = db.execute("""
+                SELECT id, symbol, ts, price,
+                       max_pct, min_pct,
+                       c1, c3, c5, c15
+                FROM signals
+                WHERE ts > ?
+            """, (
+                now - OUTCOME_WINDOW,
+            )).fetchall()
+
+            for row in rows:
+                (
+                    sid, symbol, ts, price,
+                    max_pct, min_pct,
+                    c1, c3, c5, c15
+                ) = row
+
+                current = price_map.get(symbol)
+
+                if (
+                    not current
+                    or not price
+                    or price <= 0
+                ):
+                    continue
+
+                change = (
+                    (current - price)
+                    / price
+                    * 100
+                )
+
+                updates = {
+                    "max_pct": max(max_pct, change),
+                    "min_pct": min(min_pct, change)
+                }
+
+                elapsed = now - ts
+
+                if elapsed >= 60 and c1 is None:
+                    updates["c1"] = change
+
+                if elapsed >= 180 and c3 is None:
+                    updates["c3"] = change
+
+                if elapsed >= 300 and c5 is None:
+                    updates["c5"] = change
+
+                if elapsed >= 900 and c15 is None:
+                    updates["c15"] = change
+
+                if not updates:
+                    continue
+
+                clause = ", ".join(
+                    f"{key}=?"
+                    for key in updates
+                )
+
+                db.execute(
+                    f"""
+                    UPDATE signals
+                    SET {clause}
+                    WHERE id=?
+                    """,
+                    (*updates.values(), sid)
+                )
+
+    def performance_summary(self):
+        with (
+            self.lock,
+            sqlite3.connect(self.path, timeout=5) as db
+        ):
+            return db.execute("""
+                SELECT
+                    score, setup, confirmation,
+                    max_pct, min_pct, c5, c15,
+                    status, entry_quality, priority,
+                    d30, d90, trade_1m, trade_5m,
+                    market_momentum, trap
+                FROM signals
+                WHERE c15 IS NOT NULL
+            """).fetchall()
+
+
+DBS = DB(DB_PATH)
+
+
+def candidates(data):
+    result = []
+
+    for ticker in data:
+        symbol = ticker.get("symbol", "")
+
+        if not symbol.endswith("TRY"):
+            continue
+
+        if symbol in EXCLUDED:
+            continue
+
+        try:
+            volume = float(
+                ticker.get("quoteVolume", 0)
+            )
+
+            change = float(
+                ticker.get("priceChangePercent", 0)
+            )
+
+            price = float(
+                ticker.get("lastPrice", 0)
+            )
+
+            if volume < MIN_QUOTE_VOLUME:
+                continue
+
+            if change > 25:
+                continue
+
+            if price <= 0:
+                continue
+
+            result.append({
+                "symbol": symbol,
+                "volume": volume,
+                "chg": change,
+                "price": price
+            })
+
+        except (TypeError, ValueError):
+            continue
+
+    return result
+
+
+def shortlist(items):
+    def rank(item):
+        return (
+            item["volume"]
+            *
+            (
+                1
+                +
+                max(item["chg"], 0) / 100
+            )
+        )
+
+    return sorted(
+        items,
+        key=rank,
+        reverse=True
+    )[:SHORTLIST]

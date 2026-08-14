@@ -2523,3 +2523,25 @@ continue
 
 
             # Aşırı günlük yükselişi kovalamıyoruz.
+if change > 25:
+
+                continue
+
+
+            result.append({
+                "symbol": symbol,
+                "volume": quote_volume,
+                "chg": change,
+                "price": price
+            })
+
+
+        except (
+            TypeError,
+            ValueError
+        ):
+
+            continue
+
+
+    return result

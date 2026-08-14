@@ -3821,4 +3821,30 @@ buyer_percent >= 65
             "penalty": penalty,
 
             "price": price,
-            level = "INTERNAL"
+            
+
+            "chg": item["chg"],
+
+            "loc": location,
+
+            "bp": buyer_percent,
+
+            "vr": volume_ratio,
+
+            "vr5": volume5_ratio,
+
+            "rv": current_rsi,
+
+            "ad": adx_value,
+
+            "dist": distance_to_resistance,
+
+            "ema": ema_up,
+
+            "macd": macd_up,
+
+            "squeeze": squeeze,
+
+            "hl": higher_low,
+
+            "breakout": breakout,

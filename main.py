@@ -2459,3 +2459,23 @@ class DB:
 DBS = DB(
     DB_PATH
 )       
+# =========================================================
+# ADAYLAR
+# =========================================================
+
+def candidates(data):
+
+    result = []
+
+
+    for ticker in data:
+
+        symbol = ticker.get(
+            "symbol",
+            ""
+        )
+
+
+        if not symbol.endswith(
+            "TRY"
+        ):

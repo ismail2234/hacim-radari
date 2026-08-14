@@ -1691,3 +1691,332 @@ def analyze(item):
             "status": "error",
             "symbol": symbol
         }
+def priority_score(r):
+
+    value = (
+        r["score"] * 0.50
+        +
+        r["entry_quality"] * 0.25
+        +
+        r["trade_conf"] * 100 * 0.10
+    )
+
+    if r["streak"] >= 3:
+        value += 8
+    elif r["streak"] >= 2:
+        value += 4
+
+    if r["closed_breakout"]:
+        value += 8
+    elif r["breakout"]:
+        value += 4
+
+    if r["bp"] >= 75:
+        value += 5
+    elif r["bp"] >= 65:
+        value += 3
+
+    if r["vr"] >= 3:
+        value += 5
+    elif r["vr"] >= 2:
+        value += 3
+    elif r["vr"] >= 1.5:
+        value += 1
+
+    if r["vr5"] >= 2:
+        value += 4
+    elif r["vr5"] >= 1.5:
+        value += 2
+
+    if r["d90"] <= LT90_EXTREME:
+        value -= 12
+    elif r["d90"] <= LT90_STRONG:
+        value -= 8
+    elif r["d90"] <= LT90_MILD:
+        value -= 4
+
+    if r["d30"] <= LT30_STRONG:
+        value -= 6
+    elif r["d30"] <= LT30_MILD:
+        value -= 3
+
+    if r["trap"]:
+        value -= 25
+
+    return max(
+        0,
+        min(100, round(value, 1))
+    )
+
+
+def rank_signals(signals):
+
+    for r in signals:
+        r["priority"] = priority_score(r)
+
+    signals.sort(
+        key=lambda x: (
+            x["priority"],
+            x["entry_quality"],
+            x["score"]
+        ),
+        reverse=True
+    )
+
+    for i, r in enumerate(
+        signals,
+        1
+    ):
+        r["rank"] = i
+
+    return signals
+
+
+def message(r):
+
+    title = (
+        "🔥 ÇOK GÜÇLÜ AL"
+        if r["status"] == "VERY"
+        else
+        "🟢 AL"
+    )
+
+    reasons = []
+
+    if r["closed_breakout"]:
+        reasons.append(
+            "Kapanış kırılımı"
+        )
+    elif r["breakout"]:
+        reasons.append(
+            "Direnç kırıldı"
+        )
+    elif r["dist"] <= 0.35:
+        reasons.append(
+            f"Direnç %{r['dist']:.2f}"
+        )
+
+    if r["vr"] >= 1.5:
+        reasons.append(
+            f"1m hacim {r['vr']:.1f}x"
+        )
+
+    if r["vr5"] >= 1.5:
+        reasons.append(
+            f"5m hacim {r['vr5']:.1f}x"
+        )
+
+    if r["impulse"] >= 2:
+        reasons.append(
+            f"İvme {r['impulse']:.1f}x"
+        )
+
+    if r["bp"] >= 65:
+        reasons.append(
+            f"Alıcı %{r['bp']:.0f}"
+        )
+
+    if r["ema"]:
+        reasons.append("EMA trend")
+
+    if r["macd"]:
+        reasons.append(
+            "MACD güçleniyor"
+        )
+
+    if r["hl"]:
+        reasons.append("Higher-Low")
+
+    if r["squeeze"]:
+        reasons.append("BB sıkışma")
+
+    if r["trades_1m"] >= MIN_1M_TRADES:
+        reasons.append(
+            "İşlem katılımı güçlü"
+        )
+
+    trap = ""
+
+    if r["trap"]:
+        trap = (
+            "\n⚠️ TUZAK: "
+            +
+            ", ".join(
+                r["trap_reasons"]
+            )
+            +
+            "\n"
+        )
+
+    return (
+        "🐋 BALİNA RADARI V22\n\n"
+        f"{title}\n\n"
+        f"🪙 #{r['symbol']}\n"
+        f"💰 {r['price']:.8g}\n"
+        f"💪 Güç: {r['score']}/100\n"
+        f"🏆 Öncelik: {r['priority']:.0f}/100\n"
+        f"🎯 Giriş: {r['entry_quality']}/100\n"
+        f"🔁 Teyit: {r['streak']}x\n\n"
+        f"📊 1m Hacim: {r['vr']:.2f}x | "
+        f"5m: {r['vr5']:.2f}x\n"
+        f"🚀 İvme: {r['impulse']:.2f}x\n"
+        f"🛒 Alıcı: %{r['bp']:.0f}\n"
+        f"🔢 İşlem: {r['trades_1m']}\n"
+        f"📈 RSI: {r['rv']:.0f} | "
+        f"ADX: {r['ad']:.0f}\n"
+        f"🎯 Direnç: %{r['dist']:.2f}\n"
+        f"🚀 Kırılım: "
+        f"{'✅' if r['breakout'] else '⏳'}\n"
+        f"📅 30g: {r['d30']:+.1f}% | "
+        f"90g: {r['d90']:+.1f}%\n"
+        f"🌐 BTC/TRY: "
+        f"{r['market_momentum']:+.2f}%\n"
+        f"{trap}\n"
+        f"🔎 {' • '.join(reasons[:8])}\n\n"
+        +
+        (
+            "🚀 Güçlü teyit."
+            if r["status"] == "VERY"
+            else
+            "🎯 Alım teyidi oluştu."
+        )
+    )
+
+
+def scan():
+
+    start = time.time()
+
+    data = tickers()
+
+    if not data:
+        return True
+
+    price_map = {}
+
+    for item in data:
+        try:
+            price_map[
+                item.get("symbol")
+            ] = float(
+                item.get(
+                    "lastPrice",
+                    0
+                )
+            )
+        except (TypeError, ValueError):
+            continue
+
+    DBS.update_outcomes(
+        price_map
+    )
+
+    all_candidates = candidates(data)
+    items = shortlist(all_candidates)
+
+    signals = []
+    stats = {}
+
+    with ThreadPoolExecutor(
+        max_workers=WORKERS
+    ) as executor:
+
+        jobs = [
+            executor.submit(
+                analyze,
+                item
+            )
+            for item in items
+        ]
+
+        for job in as_completed(jobs):
+
+            try:
+                r = job.result()
+            except Exception:
+                r = {"status": "error"}
+
+            status = r.get(
+                "status",
+                "error"
+            )
+
+            stats[status] = (
+                stats.get(status, 0)
+                + 1
+            )
+
+            if status in (
+                "BUY",
+                "VERY"
+            ):
+                signals.append(r)
+
+    signals = rank_signals(
+        signals
+    )
+
+    sent = 0
+
+    for r in signals:
+
+        if sent >= MAX_SIGNALS:
+            break
+
+        if r["priority"] < MIN_PRIORITY:
+            continue
+
+        if not DBS.can_send(
+            r["symbol"],
+            r["status"]
+        ):
+            continue
+
+        if telegram(
+            message(r)
+        ):
+
+            DBS.put(
+                r["symbol"],
+                r["score"],
+                r["status"],
+                r["status"],
+                sent=time.time(),
+                streak=r["streak"],
+                trap=r["trap"],
+                priority=r["priority"]
+            )
+
+            DBS.create_signal(r)
+
+            sent += 1
+
+        time.sleep(0.3)
+
+    elapsed = (
+        time.time() - start
+    )
+
+    errors = stats.get(
+        "error",
+        0
+    )
+
+    log.info(
+        "V22 | TRY:%d/%d | AL:%d | "
+        "VERY:%d | Hata:%d | "
+        "Gönder:%d | %.1fs",
+        len(items),
+        len(all_candidates),
+        stats.get("BUY", 0),
+        stats.get("VERY", 0),
+        errors,
+        sent,
+        elapsed
+    )
+
+    return (
+        errors / max(1, len(items)) > 0.30
+        or
+        elapsed > SCAN_INTERVAL * 1.25
+    )

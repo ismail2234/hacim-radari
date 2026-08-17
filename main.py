@@ -486,3 +486,583 @@ def scan() -> bool:
                         ),
                         e,
                     )
+        # ----------------------------------------------------
+        # SONUÇLARI SAY
+        # ----------------------------------------------------
+
+        for result in results:
+
+            status = result.get(
+                "status",
+                "PASS",
+            )
+
+            if status in stats:
+                stats[status] += 1
+
+        # ----------------------------------------------------
+        # SADECE GERÇEK SİNYALLER
+        # ----------------------------------------------------
+
+        signals = [
+            r
+            for r in results
+            if r.get("status")
+            in (
+                "ONCU",
+                "BUY",
+                "VERY",
+            )
+        ]
+
+        # ----------------------------------------------------
+        # SIRALAMA
+        # ----------------------------------------------------
+
+        if signals:
+
+            try:
+                ranked = rank_signals(
+                    signals,
+                    SETTINGS,
+                )
+
+            except TypeError:
+
+                try:
+                    ranked = rank_signals(
+                        signals
+                    )
+
+                except Exception:
+                    log.exception(
+                        "rank_signals hatası"
+                    )
+                    ranked = signals
+
+            except Exception:
+
+                log.exception(
+                    "rank_signals hatası"
+                )
+
+                ranked = signals
+
+        else:
+
+            ranked = []
+
+        # ----------------------------------------------------
+        # MAX SİNYAL
+        # ----------------------------------------------------
+
+        ranked = ranked[
+            :SETTINGS.max_signals
+        ]
+
+        # ----------------------------------------------------
+        # TELEGRAM
+        # ----------------------------------------------------
+
+        for result in ranked:
+
+            symbol = result.get(
+                "symbol",
+                "",
+            )
+
+            level = result.get(
+                "status",
+                "PASS",
+            )
+
+            if level == "PASS":
+                continue
+
+            try:
+
+                can_send = DBS.can_send(
+                    symbol,
+                    level,
+                    SETTINGS.cooldown,
+                )
+
+            except Exception:
+
+                log.exception(
+                    "can_send hatası | %s",
+                    symbol,
+                )
+
+                can_send = False
+
+            if not can_send:
+
+                log.info(
+                    "Cooldown | %s | %s",
+                    symbol,
+                    level,
+                )
+
+                continue
+
+            text = message(result)
+
+            try:
+
+                message_id = CLIENT.telegram(
+                    text
+                )
+
+            except Exception:
+
+                log.exception(
+                    "Telegram gönderim hatası | %s",
+                    symbol,
+                )
+
+                message_id = None
+
+            if not message_id:
+                continue
+
+            sent += 1
+
+            # ------------------------------------------------
+            # DB SİNYAL KAYDI
+            # ------------------------------------------------
+
+            try:
+
+                DBS.create_signal(
+                    result
+                )
+
+            except Exception:
+
+                log.exception(
+                    "Sinyal DB kaydı başarısız | %s",
+                    symbol,
+                )
+
+            # ------------------------------------------------
+            # STATE
+            # ------------------------------------------------
+
+            try:
+
+                DBS.put(
+                    symbol=symbol,
+                    score=result.get(
+                        "score",
+                        0,
+                    ),
+                    level=level,
+                    stage=level,
+                    sent=True,
+                    streak=result.get(
+                        "streak"
+                    ),
+                    trap=result.get(
+                        "trap",
+                        False,
+                    ),
+                    priority=result.get(
+                        "priority",
+                        0,
+                    ),
+                )
+
+            except Exception:
+
+                log.exception(
+                    "State kaydı başarısız | %s",
+                    symbol,
+                )
+
+            log.info(
+                "SİNYAL GÖNDERİLDİ | "
+                "%s | %s | skor=%s",
+                symbol,
+                level,
+                result.get(
+                    "score",
+                    0,
+                ),
+            )
+
+        # ----------------------------------------------------
+        # OUTCOME
+        # ----------------------------------------------------
+
+        try:
+
+            price_map = {
+                str(
+                    x.get(
+                        "symbol"
+                    )
+                ).upper(): float(
+                    x.get(
+                        "lastPrice",
+                        0,
+                    )
+                )
+                for x in all_candidates
+                if x.get("symbol")
+            }
+
+            DBS.update_outcomes(
+                price_map,
+                SETTINGS.outcome_window,
+            )
+
+        except Exception:
+
+            log.exception(
+                "Outcome güncelleme hatası"
+            )
+
+        # ----------------------------------------------------
+        # SÜRE
+        # ----------------------------------------------------
+
+        elapsed = (
+            time.time()
+            - started
+        )
+
+        log.info(
+            "V26 | "
+            "TRY:%d/%d | "
+            "ÖNCÜ:%d | "
+            "AL:%d | "
+            "VERY:%d | "
+            "Hata:%d | "
+            "Gönder:%d | "
+            "%.1fs",
+            len(items),
+            len(all_candidates),
+            stats.get(
+                "ONCU",
+                0,
+            ),
+            stats.get(
+                "BUY",
+                0,
+            ),
+            stats.get(
+                "VERY",
+                0,
+            ),
+            stats.get(
+                "error",
+                0,
+            ),
+            sent,
+            elapsed,
+        )
+
+        # ----------------------------------------------------
+        # BACKOFF
+        # ----------------------------------------------------
+
+        return (
+            stats.get(
+                "error",
+                0,
+            )
+            / max(
+                1,
+                len(items),
+            )
+            > 0.30
+            or elapsed
+            > SETTINGS.scan_interval * 1.25
+        )
+
+    except Exception:
+
+        log.exception(
+            "SCAN genel hatası"
+        )
+
+        return True
+
+
+# ============================================================
+# ANA LOOP
+# ============================================================
+
+def loop():
+
+    log.info(
+        "🐋 BALİNA RADARI V26 başlatılıyor..."
+    )
+
+    # --------------------------------------------------------
+    # BINANCE MARKET KONTROLÜ
+    # --------------------------------------------------------
+
+    try:
+
+        info = CLIENT.exchange_info()
+
+        if not info:
+            raise RuntimeError(
+                "Binance exchangeInfo boş döndü."
+            )
+
+        symbols = {
+            str(
+                x.get(
+                    "symbol",
+                    "",
+                )
+            ).upper()
+            for x in info.get(
+                "symbols",
+                [],
+            )
+            if x.get("symbol")
+        }
+
+        try_count = sum(
+            1
+            for symbol in symbols
+            if symbol.endswith("TRY")
+        )
+
+        if try_count <= 0:
+
+            log.error(
+                "TRY market bulunamadı. "
+                "Binance API: %s",
+                SETTINGS.base_url,
+            )
+
+            # Burada botu tamamen öldürmek yerine
+            # taramaya devam etmesi için bekle.
+            time.sleep(60)
+            return
+
+        log.info(
+            "Binance doğrulandı | TRY:%d | API:%s",
+            try_count,
+            SETTINGS.base_url,
+        )
+
+    except Exception as e:
+
+        log.exception(
+            "MARKET DOĞRULAMA HATASI: %s",
+            e,
+        )
+
+        time.sleep(60)
+        return
+
+    # --------------------------------------------------------
+    # TELEGRAM AKTİVASYON
+    # --------------------------------------------------------
+
+    if (
+        SETTINGS.telegram_token
+        and SETTINGS.telegram_chat
+    ):
+
+        try:
+
+            CLIENT.telegram(
+                "🐋 BALİNA RADARI V26 AKTİF\n\n"
+                "📐 MA7 / MA30 / MA99\n"
+                "📦 Daralma + Bollinger sıkışması\n"
+                "🚀 Kapanmış mum kırılımı\n"
+                "📊 Hacim + alıcı baskısı\n"
+                "📈 RSI + MACD + ADX\n"
+                "💠 VWAP teyidi\n"
+                "🛡️ Fakeout filtresi\n"
+                "🚨 Tuzak filtresi\n"
+                "🔁 Streak / tekrar sinyal takibi\n"
+                "⚡ Rate-limit koruması aktif"
+            )
+
+        except Exception:
+
+            log.exception(
+                "Telegram aktivasyon mesajı gönderilemedi."
+            )
+
+    # --------------------------------------------------------
+    # TEMİZLİK
+    # --------------------------------------------------------
+
+    last_cleanup = 0.0
+
+    # --------------------------------------------------------
+    # SÜREKLİ TARAMA
+    # --------------------------------------------------------
+
+    while True:
+
+        started = time.time()
+
+        try:
+
+            backoff = scan()
+
+        except Exception:
+
+            log.exception(
+                "Tarama döngüsü hatası"
+            )
+
+            backoff = True
+
+        # ----------------------------------------------------
+        # GÜNLÜK DB TEMİZLİĞİ
+        # ----------------------------------------------------
+
+        if (
+            started - last_cleanup
+            > 86400
+        ):
+
+            try:
+
+                removed = (
+                    DBS.cleanup_old_signals()
+                )
+
+                if removed:
+
+                    log.info(
+                        "%d eski sinyal silindi.",
+                        removed,
+                    )
+
+            except Exception:
+
+                log.exception(
+                    "DB temizliği başarısız"
+                )
+
+            last_cleanup = started
+
+        # ----------------------------------------------------
+        # BEKLEME
+        # ----------------------------------------------------
+
+        elapsed = (
+            time.time()
+            - started
+        )
+
+        if backoff:
+
+            sleep_time = max(
+                180,
+                SETTINGS.scan_interval * 3,
+            )
+
+        else:
+
+            sleep_time = max(
+                1,
+                SETTINGS.scan_interval
+                - elapsed,
+            )
+
+        log.info(
+            "Sonraki tarama %.0f sn sonra.",
+            sleep_time,
+        )
+
+        time.sleep(
+            sleep_time
+        )
+
+
+# ============================================================
+# FLASK
+# ============================================================
+
+app = Flask(__name__)
+
+
+@app.route("/")
+def home():
+
+    return (
+        "🐋 Balina Radarı V26 Aktif"
+    )
+
+
+@app.route("/health")
+def health():
+
+    return {
+        "status": "ok",
+        "bot": "Balina Radarı V26",
+        "scan_interval":
+            SETTINGS.scan_interval,
+        "workers":
+            SETTINGS.workers,
+        "rate_limit":
+            LIMITER.snapshot(),
+    }
+
+
+@app.route("/performance")
+def performance():
+
+    try:
+
+        samples = len(
+            DBS.performance_summary()
+        )
+
+    except Exception:
+
+        log.exception(
+            "Performance sorgusu başarısız"
+        )
+
+        samples = 0
+
+    return {
+        "status": "ok",
+        "bot": "Balina Radarı V26",
+        "samples": samples,
+    }
+
+
+# ============================================================
+# BACKGROUND THREAD
+# ============================================================
+
+Thread(
+    target=loop,
+    daemon=True,
+    name="balina-v26",
+).start()
+
+
+# ============================================================
+# FLASK SERVER
+# ============================================================
+
+if __name__ == "__main__":
+
+    port = int(
+        os.getenv(
+            "PORT",
+            "8080",
+        )
+    )
+
+    app.run(
+        host="0.0.0.0",
+        port=port,
+        use_reloader=False,
+                )

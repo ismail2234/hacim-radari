@@ -1069,3 +1069,583 @@ def trade_confidence(
         1.0,
         trades / 50,
     )
+def analyze(
+    cfg: Settings,
+    client: BinanceClient,
+    db: DB,
+    market: MarketData,
+    item: dict,
+) -> dict:
+
+    symbol = item["symbol"]
+
+    try:
+        # =====================================================
+        # 5M VERİ
+        # =====================================================
+
+        k5 = client.klines(
+            symbol,
+            "5m",
+            80,
+        )
+
+        if len(k5) < 40:
+            return {
+                "status": "PASS",
+                "symbol": symbol,
+            }
+
+        # Son açık 5m mumu çıkar
+        c5 = k5[:-1]
+
+        close5 = [
+            safe_float(x[4])
+            for x in c5
+        ]
+
+        volume5 = [
+            safe_float(x[7])
+            for x in c5
+        ]
+
+        trades5_sum = sum(
+            int(safe_float(x[8]))
+            for x in c5[-1:]
+        )
+
+        # Sert düşüş filtresi
+        if len(close5) >= 5:
+
+            early_momentum = pct(
+                close5[-5],
+                close5[-1],
+            )
+
+            if early_momentum < -3:
+
+                return {
+                    "status": "PASS",
+                    "symbol": symbol,
+                }
+
+        # =====================================================
+        # 1M VERİ
+        # =====================================================
+
+        k1 = client.klines(
+            symbol,
+            "1m",
+            180,
+        )
+
+        if len(k1) < 110:
+
+            return {
+                "status": "PASS",
+                "symbol": symbol,
+            }
+
+        # Son açık 1m mumu çıkar
+        c1 = k1[:-1]
+
+        # =====================================================
+        # ÖZELLİKLER
+        # =====================================================
+
+        f = calculate_features(
+            cfg,
+            c1,
+            close5,
+            volume5,
+            trades5_sum,
+        )
+
+        # =====================================================
+        # FAKEOUT / TUZAK
+        # =====================================================
+
+        f = apply_fakeout_filter(
+            f,
+            cfg,
+        )
+
+        f = apply_trap_filter(
+            f,
+            cfg,
+        )
+
+        # =====================================================
+        # TEYİTLER
+        # =====================================================
+
+        confirmations, criteria = (
+            confirmation_count(
+                f,
+                cfg,
+            )
+        )
+
+        score = calculate_score(
+            f,
+            cfg,
+            confirmations,
+        )
+
+        stage = decide_stage(
+            f,
+            cfg,
+            score,
+            confirmations,
+        )
+
+        # =====================================================
+        # MARKET DURUMU
+        # =====================================================
+
+        market_ctx = market.context()
+
+        market_momentum = safe_float(
+            market_ctx.get(
+                "momentum",
+                0.0,
+            )
+        )
+
+        # =====================================================
+        # GÜNLÜK TREND
+        # =====================================================
+
+        trend = market.daily_trend(
+            symbol
+        )
+
+        if trend.get("ok"):
+
+            d30 = trend.get(
+                "d30"
+            )
+
+            d90 = trend.get(
+                "d90"
+            )
+
+        else:
+
+            d30 = None
+            d90 = None
+
+        if not trend.get("ok"):
+
+            trend_state = "VERİ YOK"
+
+        elif (
+            d30 > 10
+            and d90 > 0
+        ):
+
+            trend_state = "POZİTİF TREND"
+
+        elif (
+            d90 < -65
+            or d30 < -35
+        ):
+
+            trend_state = (
+                "YÜKSEK DÜŞÜŞ RİSKİ"
+            )
+
+        elif (
+            d90 < -50
+            or d30 < -20
+        ):
+
+            trend_state = "DÜŞÜŞ RİSKİ"
+
+        else:
+
+            trend_state = "NÖTR"
+
+        # =====================================================
+        # GİRİŞ KALİTESİ
+        # =====================================================
+
+        entry = 100
+
+        if not f.closed_breakout:
+            entry -= 20
+
+        if (
+            f.vr
+            < cfg.volume_ratio_buy
+        ):
+            entry -= 15
+
+        if (
+            f.bp
+            < cfg.buyer_pressure_min
+        ):
+            entry -= 15
+
+        if f.ad < cfg.adx_min:
+            entry -= 10
+
+        if f.rv > 75:
+            entry -= 10
+
+        if f.fakeout:
+            entry -= 25
+
+        if f.trap:
+            entry -= 30
+
+        entry = max(
+            0,
+            min(100, entry),
+        )
+
+        # =====================================================
+        # STOP REFERANSI
+        # =====================================================
+
+        stop_loss = (
+            f.ma7 * 0.997
+            if f.ma7 > 0
+            else f.price * 0.995
+        )
+
+        stop_distance = (
+            (
+                f.price
+                - stop_loss
+            )
+            / f.price
+            * 100
+            if f.price > 0
+            else 0.0
+        )
+
+        # =====================================================
+        # ÖNCEKİ SİNYAL
+        # =====================================================
+
+        previous_text = "İlk sinyal"
+
+        try:
+
+            previous = (
+                db.get_last_signal(
+                    symbol
+                )
+            )
+
+        except Exception:
+
+            previous = None
+
+        if previous:
+
+            previous_ts = safe_float(
+                previous.get(
+                    "ts",
+                    0,
+                )
+            )
+
+            elapsed_previous = (
+                time.time()
+                - previous_ts
+            )
+
+            if (
+                elapsed_previous
+                < cfg.repeat_window
+            ):
+
+                mins = int(
+                    elapsed_previous
+                    // 60
+                )
+
+                if mins < 1:
+
+                    previous_text = (
+                        "Daha önce: az önce"
+                    )
+
+                else:
+
+                    previous_text = (
+                        "Daha önce: "
+                        f"{mins} dk önce"
+                    )
+
+        # =====================================================
+        # OPEN INTEREST
+        # =====================================================
+
+        oi_available = False
+        oi_change = None
+
+        # Binance TR spot piyasasında
+        # OI çoğu sembol için bulunmayabilir.
+        # Bu nedenle zorunlu değildir.
+
+        if (
+            cfg.oi_enabled
+            and hasattr(
+                client,
+                "open_interest_change",
+            )
+        ):
+
+            try:
+
+                oi_result = (
+                    client.open_interest_change(
+                        symbol
+                    )
+                )
+
+                if oi_result is not None:
+
+                    oi_available = True
+
+                    oi_change = safe_float(
+                        oi_result
+                    )
+
+            except Exception:
+
+                oi_available = False
+                oi_change = None
+
+        # =====================================================
+        # STREAK
+        # =====================================================
+
+        qualified = (
+            stage
+            in (
+                "ONCU",
+                "BUY",
+                "VERY",
+            )
+            and not f.trap
+            and not f.fakeout
+        )
+
+        streak = db.update_streak(
+            symbol,
+            qualified,
+            f.trap,
+        )
+
+        # =====================================================
+        # PRIORITY
+        # =====================================================
+
+        # Öncelik; skor + giriş kalitesi +
+        # teyit sayısı + hacim + alıcı baskısından oluşur.
+
+        priority = (
+            score * 0.45
+            + entry * 0.25
+            + min(
+                confirmations * 5,
+                25,
+            )
+            + min(
+                max(f.vr - 1, 0)
+                * 5,
+                10,
+            )
+            + min(
+                max(f.bp - 50, 0)
+                * 0.2,
+                10,
+            )
+        )
+
+        # Tuzak/fakeout varsa önceliği düşür.
+        if f.fakeout:
+            priority -= 25
+
+        if f.trap:
+            priority -= 30
+
+        priority = max(
+            0,
+            min(100, priority),
+        )
+
+        # =====================================================
+        # SONUÇ
+        # =====================================================
+
+        return {
+            "status": stage,
+            "symbol": symbol,
+
+            "price": f.price,
+
+            "score": score,
+            "priority": priority,
+            "entry_quality": entry,
+
+            "setup": confirmations,
+            "confirmation": confirmations,
+            "penalty": (
+                (20 if f.fakeout else 0)
+                + (25 if f.trap else 0)
+            ),
+
+            # MA
+            "ma7": f.ma7,
+            "ma30": f.ma30,
+            "ma99": f.ma99,
+            "ma7_old": f.ma7_old,
+            "ma7_cross": f.ma7_cross,
+            "ma_structure": f.ma_structure,
+
+            # Daralma
+            "consolidation": f.consolidation,
+            "consolidation_range": (
+                f.consolidation_range
+            ),
+            "bb_width": f.bb_width,
+
+            # Kırılım
+            "resistance": f.resistance,
+            "dist": f.dist,
+            "breakout": f.breakout,
+            "closed_breakout": (
+                f.closed_breakout
+            ),
+
+            # Hacim
+            "vr": f.vr,
+            "vr5": f.vr5,
+            "impulse": f.impulse,
+
+            # Alıcı
+            "bp": f.bp,
+
+            # İşlem
+            "trades_1m": f.trades1,
+            "trades_5m": f.trades5,
+
+            # Momentum
+            "rv": f.rv,
+            "old_rsi": f.old_rsi,
+            "ad": f.ad,
+            "plus_di": f.plus_di,
+            "minus_di": f.minus_di,
+            "adx_rising": f.adx_rising,
+            "macd": f.macd_up,
+
+            # Mum
+            "close_position": (
+                f.close_position
+            ),
+            "upper_wick_pct": (
+                f.upper_wick_pct
+            ),
+            "strong_close": (
+                f.strong_close
+            ),
+
+            # Yapı
+            "hl": f.higher_low,
+
+            # VWAP
+            "price_above_vwap": (
+                f.price_above_vwap
+            ),
+            "vwap_value": f.vwap_value,
+
+            # Fakeout
+            "fakeout": f.fakeout,
+            "fakeout_reasons": (
+                f.fakeout_reasons
+            ),
+
+            # Tuzak
+            "trap": f.trap,
+            "trap_reasons": (
+                f.trap_reasons
+            ),
+
+            # Teyit listesi
+            "criteria_count": confirmations,
+            "criteria_list": criteria,
+
+            # Trend
+            "d30": d30,
+            "d90": d90,
+            "trend_state": trend_state,
+
+            # Market
+            "market_momentum": (
+                market_momentum
+            ),
+
+            # Stop
+            "stop_loss": stop_loss,
+            "stop_distance": (
+                stop_distance
+            ),
+
+            # Tekrar sinyal
+            "previous_signal": (
+                previous_text
+            ),
+            "streak": streak,
+
+            # OI
+            "oi_available": (
+                oi_available
+            ),
+            "oi_change": oi_change,
+        }
+
+    except Exception as exc:
+
+        log.warning(
+            "%s analiz hatası: %s",
+            symbol,
+            exc,
+            exc_info=True,
+        )
+
+        return {
+            "status": "error",
+            "symbol": symbol,
+        }
+
+
+def rank_signals(
+    cfg: Settings,
+    signals: list[dict],
+) -> list[dict]:
+
+    """
+    Sinyalleri en güçlüden zayıfa sıralar.
+
+    Öncelik:
+    1. priority
+    2. score
+    3. entry_quality
+    4. confirmations
+    """
+
+    return sorted(
+        signals,
+        key=lambda r: (
+            r.get("priority", 0),
+            r.get("score", 0),
+            r.get("entry_quality", 0),
+            r.get("criteria_count", 0),
+        ),
+        reverse=True,
+        )

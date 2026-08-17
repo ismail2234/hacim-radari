@@ -652,3 +652,420 @@ def calculate_features(
         price_above_vwap=price_above_vwap,
         vwap_value=vwap_value,
     )
+def apply_fakeout_filter(
+    f: Features,
+    cfg: Settings,
+) -> Features:
+
+    reasons = []
+
+    if f.breakout and not f.strong_close:
+        reasons.append("zayıf kapanış")
+
+    if (
+        f.upper_wick_pct
+        > cfg.fakeout_max_wick
+    ):
+        reasons.append("uzun üst fitil")
+
+    if (
+        f.breakout
+        and f.bp < cfg.buyer_pressure_min
+    ):
+        reasons.append(
+            "alıcı baskısı düşük"
+        )
+
+    if (
+        f.breakout
+        and f.vr < cfg.volume_ratio_buy
+    ):
+        reasons.append(
+            "hacim teyidi zayıf"
+        )
+
+    f.fakeout_reasons = reasons
+    f.fakeout = bool(reasons)
+
+    return f
+
+
+def apply_trap_filter(
+    f: Features,
+    cfg: Settings,
+) -> Features:
+
+    reasons = []
+
+    if (
+        f.vr >= cfg.volume_ratio_strong
+        and f.bp < 50
+    ):
+        reasons.append(
+            "yüksek hacim/zayıf alıcı"
+        )
+
+    if (
+        f.momentum5 < -1.2
+        and not f.higher_low
+    ):
+        reasons.append(
+            "negatif momentum"
+        )
+
+    if (
+        f.breakout
+        and f.vr < cfg.volume_ratio_buy
+    ):
+        reasons.append(
+            "kırılım hacimsiz"
+        )
+
+    if (
+        f.breakout
+        and f.close_position < 50
+    ):
+        reasons.append(
+            "kapanış zayıf"
+        )
+
+    f.trap_reasons = reasons
+    f.trap = bool(reasons)
+
+    return f
+
+
+def confirmation_count(
+    f: Features,
+    cfg: Settings,
+) -> tuple[int, list[str]]:
+
+    checks = []
+
+    if f.consolidation:
+        checks.append("Daralma")
+
+    if f.ma7_cross:
+        checks.append("MA7 kırılımı")
+
+    if f.ma_structure:
+        checks.append(
+            "MA7>MA30>MA99"
+        )
+
+    if f.closed_breakout:
+        checks.append(
+            "Kapanmış mum kırılımı"
+        )
+
+    if (
+        f.vr
+        >= cfg.volume_ratio_buy
+    ):
+        checks.append(
+            f"Hacim {f.vr:.1f}x"
+        )
+
+    if (
+        f.bp
+        >= cfg.buyer_pressure_min
+    ):
+        checks.append(
+            f"Alıcı %{f.bp:.0f}"
+        )
+
+    if (
+        cfg.rsi_min
+        <= f.rv
+        <= cfg.rsi_max
+        and f.rv > f.old_rsi
+    ):
+        checks.append(
+            "RSI yükseliyor"
+        )
+
+    if f.macd_up:
+        checks.append(
+            "MACD güçleniyor"
+        )
+
+    if (
+        f.ad >= cfg.adx_min
+        and f.plus_di > f.minus_di
+    ):
+        checks.append(
+            "ADX/+DI"
+        )
+
+    if f.adx_rising:
+        checks.append(
+            "ADX yükseliyor"
+        )
+
+    if f.price_above_vwap:
+        checks.append(
+            "VWAP üstü"
+        )
+
+    if f.strong_close:
+        checks.append(
+            "Güçlü kapanış"
+        )
+
+    return (
+        len(checks),
+        checks,
+    )
+
+
+def calculate_score(
+    f: Features,
+    cfg: Settings,
+    confirmations: int,
+) -> int:
+
+    score = 0
+
+    # ---------------------------------------------------------
+    # DARALMA
+    # ---------------------------------------------------------
+
+    if f.consolidation:
+        score += 15
+
+    # ---------------------------------------------------------
+    # MA
+    # ---------------------------------------------------------
+
+    if f.ma7_cross:
+        score += 15
+
+    if f.ma_structure:
+        score += 10
+
+    # ---------------------------------------------------------
+    # KIRILIM
+    # ---------------------------------------------------------
+
+    if f.closed_breakout:
+        score += 15
+
+    # ---------------------------------------------------------
+    # HACİM
+    # ---------------------------------------------------------
+
+    if (
+        f.vr
+        >= cfg.volume_ratio_strong
+    ):
+        score += 12
+
+    elif (
+        f.vr
+        >= cfg.volume_ratio_buy
+    ):
+        score += 8
+
+    # ---------------------------------------------------------
+    # ALICI BASKISI
+    # ---------------------------------------------------------
+
+    if (
+        f.bp
+        >= cfg.buyer_pressure_strong
+    ):
+        score += 10
+
+    elif (
+        f.bp
+        >= cfg.buyer_pressure_min
+    ):
+        score += 6
+
+    # ---------------------------------------------------------
+    # RSI
+    # ---------------------------------------------------------
+
+    if (
+        cfg.rsi_min
+        <= f.rv
+        <= cfg.rsi_max
+        and f.rv > f.old_rsi
+    ):
+        score += 8
+
+    # ---------------------------------------------------------
+    # MACD
+    # ---------------------------------------------------------
+
+    if f.macd_up:
+        score += 7
+
+    # ---------------------------------------------------------
+    # ADX
+    # ---------------------------------------------------------
+
+    if (
+        f.ad >= cfg.adx_strong
+        and f.plus_di > f.minus_di
+    ):
+        score += 10
+
+    elif (
+        f.ad >= cfg.adx_min
+        and f.plus_di > f.minus_di
+    ):
+        score += 6
+
+    if f.adx_rising:
+        score += 4
+
+    # ---------------------------------------------------------
+    # VWAP
+    # ---------------------------------------------------------
+
+    if f.price_above_vwap:
+        score += 3
+
+    # ---------------------------------------------------------
+    # MUM
+    # ---------------------------------------------------------
+
+    if f.strong_close:
+        score += 5
+
+    # ---------------------------------------------------------
+    # HIGHER LOW
+    # ---------------------------------------------------------
+
+    if f.higher_low:
+        score += 3
+
+    # ---------------------------------------------------------
+    # CEZALAR
+    # ---------------------------------------------------------
+
+    if f.fakeout:
+        score -= 20
+
+    if f.trap:
+        score -= 25
+
+    if f.rv >= 80:
+        score -= 10
+
+    if f.momentum1 > 5:
+        score -= 8
+
+    return max(
+        0,
+        min(100, score),
+    )
+
+
+def decide_stage(
+    f: Features,
+    cfg: Settings,
+    score: int,
+    confirmations: int,
+) -> str:
+
+    # Tuzak veya fakeout varsa
+    # hiçbir seviyede sinyal üretme.
+    if f.trap or f.fakeout:
+        return "PASS"
+
+    momentum_ok = (
+        f.macd_up
+        or f.adx_rising
+        or f.momentum1
+        >= cfg.momentum_min
+    )
+
+    volume_ok = (
+        f.vr
+        >= cfg.volume_ratio_buy
+    )
+
+    buyer_ok = (
+        f.bp
+        >= cfg.buyer_pressure_min
+    )
+
+    rsi_ok = (
+        cfg.rsi_min
+        <= f.rv
+        <= cfg.rsi_max
+    )
+
+    # ---------------------------------------------------------
+    # GÜÇLÜ AL
+    # ---------------------------------------------------------
+
+    if (
+        score
+        >= cfg.min_score_strong
+        and f.closed_breakout
+        and volume_ok
+        and buyer_ok
+        and momentum_ok
+        and rsi_ok
+        and f.ad >= cfg.adx_min
+    ):
+        return "VERY"
+
+    # ---------------------------------------------------------
+    # AL
+    # ---------------------------------------------------------
+
+    if (
+        score
+        >= cfg.min_score_buy
+        and f.closed_breakout
+        and volume_ok
+        and momentum_ok
+        and rsi_ok
+        and confirmations >= 5
+    ):
+        return "BUY"
+
+    # ---------------------------------------------------------
+    # ÖNCÜ AL
+    # ---------------------------------------------------------
+
+    if (
+        f.consolidation
+        and f.ma7 > f.ma30
+        and f.ma7 > f.ma7_old
+        and f.vr >= 1.20
+        and f.bp >= 55
+        and f.rv < cfg.rsi_max
+        and confirmations >= 4
+    ):
+        return "ONCU"
+
+    return "PASS"
+
+
+def trade_confidence(
+    cfg: Settings,
+    trades: int,
+    volume_ratio: float,
+) -> float:
+
+    if trades <= 0:
+        return 0.0
+
+    if trades < 5:
+        return 0.30
+
+    if trades < 10:
+        return 0.50
+
+    if volume_ratio >= 2:
+        return 1.0
+
+    return min(
+        1.0,
+        trades / 50,
+    )

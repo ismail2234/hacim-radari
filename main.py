@@ -168,6 +168,7 @@ def shortlist(
 # TELEGRAM MESAJI
 # ============================================================
 
+
 def message(r: dict) -> str:
 
     titles = {
@@ -176,172 +177,92 @@ def message(r: dict) -> str:
         "VERY": "🚀 GÜÇLÜ AL",
     }
 
-    status = r.get(
-        "status",
-        "PASS",
-    )
+    status = r.get("status", "PASS")
+    title = titles.get(status, status)
 
-    title = titles.get(
-        status,
-        status,
-    )
-
-    criteria = r.get(
-        "criteria_list",
-        [],
-    )
-
-    criteria_text = (
-        "\n".join(
-            f"• {item}"
-            for item in criteria
+    try:
+        streak = max(
+            1,
+            int(r.get("streak", 1) or 1),
         )
-        if criteria
-        else "• Teyit yok"
-    )
+    except (TypeError, ValueError):
+        streak = 1
 
-    d30_value = r.get("d30")
-    d90_value = r.get("d90")
-
-    d30 = (
-        f"{d30_value:+.1f}%"
-        if d30_value is not None
-        else "VERİ YOK"
-    )
-
-    d90 = (
-        f"{d90_value:+.1f}%"
-        if d90_value is not None
-        else "VERİ YOK"
-    )
-
-    fakeout = ""
-
-    if r.get("fakeout"):
-        reasons = r.get(
-            "fakeout_reasons",
-            [],
-        )
-
-        fakeout = (
-            "\n⚠️ FAKEOUT: "
-            + (
-                ", ".join(reasons)
-                if reasons
-                else "Teyit zayıf"
-            )
-            + "\n"
-        )
-
-    trap = ""
-
-    if r.get("trap"):
-        reasons = r.get(
-            "trap_reasons",
-            [],
-        )
-
-        trap = (
-            "\n🚨 TUZAK: "
-            + (
-                ", ".join(reasons)
-                if reasons
-                else "Riskli yapı"
-            )
-            + "\n"
-        )
-
-    if r.get(
-        "oi_available",
-        False,
-    ):
-        oi = (
-            f"{r.get('oi_change', 0):+.2f}%"
-        )
+    if streak == 1:
+        teyit = "🔁 1. TEYİT"
+    elif streak == 2:
+        teyit = "🔁 2. TEYİT ✅"
+    elif streak == 3:
+        teyit = "🔁 3. TEYİT 🔥"
     else:
-        oi = "Yok"
+        teyit = f"🔁 {streak}. TEYİT 🔥"
+
+    d30 = r.get("d30")
+    d90 = r.get("d90")
+
+    d30_text = (
+        f"{d30:+.1f}%"
+        if d30 is not None
+        else "-"
+    )
+
+    d90_text = (
+        f"{d90:+.1f}%"
+        if d90 is not None
+        else "-"
+    )
 
     return (
         "🐋 BALİNA RADARI V26\n\n"
-        f"{title}\n"
-        "━━━━━━━━━━━━━━\n"
-        f"🪙 #{r.get('symbol', '?')}\n"
-        f"💰 Fiyat: "
-        f"{r.get('price', 0):.8g}\n\n"
-        f"💪 Skor: "
-        f"{r.get('score', 0):.0f}/100\n"
-        f"🏆 Öncelik: "
-        f"{r.get('priority', 0):.0f}/100\n"
-        f"🎯 Giriş kalitesi: "
-        f"{r.get('entry_quality', 0):.0f}/100\n\n"
 
-        "📐 MA YAPISI\n"
-        f"MA7: {r.get('ma7', 0):.8g}\n"
-        f"MA30: {r.get('ma30', 0):.8g}\n"
-        f"MA99: {r.get('ma99', 0):.8g}\n"
-        f"MA7 kırılımı: "
-        f"{'✅' if r.get('ma7_cross') else '⏳'}\n\n"
+        f"{title} {streak}x\n"
+        f"🪙 #{r.get('symbol', '?')}  "
+        f"💰 {r.get('price', 0):.8g}\n\n"
 
-        "📦 DARALMA\n"
-        f"Daralma: "
-        f"{'✅' if r.get('consolidation') else '❌'}\n"
-        f"Aralık: "
+        f"💪 Skor: {r.get('score', 0):.0f}/100  "
+        f"🏆 Öncelik: {r.get('priority', 0):.0f}\n"
+
+        f"🎯 Giriş: "
+        f"{r.get('entry_quality', 0):.0f}\n\n"
+
+        f"📦 Daralma: "
+        f"{'✅' if r.get('consolidation') else '❌'} "
         f"%{r.get('consolidation_range', 0):.2f}\n"
-        f"BB genişliği: "
-        f"%{r.get('bb_width', 0):.2f}\n\n"
 
-        "🚀 KIRILIM\n"
-        f"Kırılım: "
-        f"{'✅' if r.get('breakout') else '⏳'}\n"
-        f"Kapanmış mum: "
-        f"{'✅' if r.get('closed_breakout') else '⏳'}\n"
-        f"Direnç mesafesi: "
-        f"%{r.get('dist', 0):.2f}\n\n"
+        f"🚀 Kırılım: "
+        f"{'✅' if r.get('closed_breakout') else '⏳'}  "
+        f"Direnç: %{r.get('dist', 0):.2f}\n\n"
 
-        "📊 HACİM / ALICI\n"
-        f"1m hacim: "
-        f"{r.get('vr', 0):.2f}x\n"
-        f"5m hacim: "
-        f"{r.get('vr5', 0):.2f}x\n"
-        f"İvme: "
-        f"{r.get('impulse', 0):.2f}x\n"
-        f"Alıcı baskısı: "
-        f"%{r.get('bp', 0):.0f}\n"
-        f"1m işlem: "
-        f"{r.get('trades_1m', 0)}\n\n"
+        f"📊 Hacim: {r.get('vr', 0):.2f}x  "
+        f"5m: {r.get('vr5', 0):.2f}x\n"
 
-        "📈 MOMENTUM\n"
-        f"RSI: {r.get('rv', 0):.1f}\n"
-        f"ADX: {r.get('ad', 0):.1f}\n"
-        f"ADX yükseliyor: "
-        f"{'✅' if r.get('adx_rising') else '❌'}\n"
-        f"MACD: "
-        f"{'✅' if r.get('macd') else '❌'}\n\n"
+        f"⚡ İvme: {r.get('impulse', 0):.2f}x  "
+        f"🟢 Alıcı: %{r.get('bp', 0):.0f}\n\n"
 
-        "🎯 TEYİTLER\n"
-        f"{criteria_text}\n\n"
+        f"📈 RSI: {r.get('rv', 0):.1f}  "
+        f"ADX: {r.get('ad', 0):.1f} "
+        f"{'↗️' if r.get('adx_rising') else '↘️'}\n"
+
+        f"📈 MACD: "
+        f"{'✅' if r.get('macd') else '❌'}  "
 
         f"💠 VWAP: "
-        f"{'ÜZERİNDE ✅' if r.get('price_above_vwap') else 'ALTINDA'}\n"
-        f"🛑 Stop referansı: "
-        f"{r.get('stop_loss', 0):.8g}\n"
-        f"📉 Stop mesafesi: "
-        f"%{r.get('stop_distance', 0):.2f}\n\n"
+        f"{'✅' if r.get('price_above_vwap') else '❌'}\n\n"
 
-        f"📅 30g: {d30} | 90g: {d90}\n"
+        f"🛑 Stop: "
+        f"{r.get('stop_loss', 0):.8g} "
+        f"(%{r.get('stop_distance', 0):.2f})\n\n"
+
+        f"{teyit}\n"
+
+        f"📅 30g: {d30_text} | "
+        f"90g: {d90_text}\n"
+
         f"🌐 BTC/TRY: "
         f"{r.get('market_momentum', 0):+.2f}%\n\n"
-        f"🔁 Teyit: "
-        f"{r.get('streak', 0)}x\n"
-        f"🕘 "
-        f"{r.get('previous_signal', 'İlk sinyal')}\n"
-        f"🟣 Open Interest: {oi}\n"
-        f"{fakeout}"
-        f"{trap}\n"
+
         "⚠️ Yatırım tavsiyesi değildir."
     )
-
-
 # ============================================================
 # TEK COIN ANALİZİ
 # ============================================================

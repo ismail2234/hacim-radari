@@ -15,16 +15,14 @@ from indicators import (
 def analyze(cfg, client, symbol):
 
     if symbol in {
-        "USDTTRY",
-        "USDC TRY",
-        "USDC TRY",
-        "USDTTRY",
-        "BUSDTRY",
-        "FDUSDTRY",
-        "TUSDTRY",
-        "DAITRY",
-    }:
-        return None
+    "USDTTRY",
+    "USDCTRY",
+    "BUSDTRY",
+    "FDUSDTRY",
+    "TUSDTRY",
+    "DAITRY",
+}:
+    return None
 
     data = client.klines(
         symbol,

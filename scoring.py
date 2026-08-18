@@ -14,7 +14,7 @@ from indicators import (
 
 def analyze(cfg, client, symbol):
 
-    if symbol in {
+if symbol in {
     "USDTTRY",
     "USDCTRY",
     "BUSDTRY",

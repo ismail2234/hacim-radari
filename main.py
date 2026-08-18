@@ -35,7 +35,7 @@ LIMITER = RateLimiter(
 
 CLIENT = BinanceClient(
     SETTINGS,
-    LIMITER,
+)
 )
 
 DBS = DB(

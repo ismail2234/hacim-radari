@@ -621,3 +621,272 @@ def analyze(
         score,
         100,
     )
+    # -----------------------------
+    # SİNYAL SEVİYESİ
+    # -----------------------------
+
+    if (
+        above_cloud
+        and fib_poc
+        and td_13
+        and vr >= 2
+    ):
+
+        status = "VERY"
+
+    elif (
+        above_cloud
+        and fib_poc
+        and td_9
+        and vr >= 2
+    ):
+
+        status = "BUY"
+
+    elif (
+        above_cloud
+        and fib_zone
+        and vr >= 2
+        and score >= 60
+    ):
+
+        status = "BUY"
+
+    elif score >= 70:
+
+        status = "BUY"
+
+    else:
+
+        status = "PASS"
+
+    # -----------------------------
+    # STOP
+    # -----------------------------
+
+    stop = fib786
+
+    if stop <= 0:
+
+        stop = price * 0.99
+
+    stop_distance = (
+        abs(price - stop)
+        / price
+        * 100
+    )
+
+    # -----------------------------
+    # TEYİT
+    # -----------------------------
+
+    streak = get_streak(
+        dbs,
+        symbol,
+    )
+
+    # -----------------------------
+    # ÖNCELİK
+    # -----------------------------
+
+    priority = score
+
+    if fib_poc:
+        priority += 5
+
+    if td_9:
+        priority += 5
+
+    if td_13:
+        priority += 5
+
+    priority = min(
+        priority,
+        100,
+    )
+
+    # -----------------------------
+    # GİRİŞ KALİTESİ
+    # -----------------------------
+
+    entry_quality = score
+
+    if fib_poc:
+        entry_quality += 5
+
+    if price_above_vwap:
+        entry_quality += 3
+
+    entry_quality = min(
+        entry_quality,
+        100,
+    )
+
+    # -----------------------------
+    # SONUÇ
+    # -----------------------------
+
+    return {
+        "symbol": symbol,
+
+        "status": status,
+
+        "price": price,
+
+        "score": score,
+
+        "priority": priority,
+
+        "entry_quality":
+            entry_quality,
+
+        "ichimoku_bullish":
+            ichimoku_bullish,
+
+        "above_cloud":
+            above_cloud,
+
+        "fib_0_5":
+            fib50,
+
+        "fib_0_618":
+            fib618,
+
+        "fib_0_786":
+            fib786,
+
+        "fib_zone":
+            fib_zone,
+
+        "poc":
+            poc,
+
+        "va_low":
+            va_low,
+
+        "va_high":
+            va_high,
+
+        "poc_distance":
+            poc_distance,
+
+        "fib_poc":
+            fib_poc,
+
+        "td_setup":
+            td,
+
+        "td_direction":
+            td_direction,
+
+        "td_9":
+            td_9,
+
+        "td_13":
+            td_13,
+
+        "volume_ratio":
+            vr,
+
+        "impulse":
+            impulse,
+
+        "rsi":
+            rv,
+
+        "rsi_rising":
+            rsi_rising,
+
+        "macd":
+            macd_ok,
+
+        "macd_line":
+            macd_line,
+
+        "macd_signal":
+            macd_signal,
+
+        "macd_hist":
+            macd_hist,
+
+        "adx":
+            ad_value,
+
+        "plus_di":
+            plus_di,
+
+        "minus_di":
+            minus_di,
+
+        "adx_ok":
+            adx_ok,
+
+        "di_ok":
+            di_ok,
+
+        "vwap":
+            vwap_value,
+
+        "price_above_vwap":
+            price_above_vwap,
+
+        "stop":
+            stop,
+
+        "stop_loss":
+            stop,
+
+        "stop_distance":
+            stop_distance,
+
+        "criteria":
+            criteria,
+
+        "criteria_list":
+            criteria,
+
+        "streak":
+            streak,
+
+        "previous_signal":
+            "İlk sinyal"
+            if streak <= 1
+            else f"{streak - 1}. teyit",
+    }
+
+
+def rank_signals(
+    signals,
+    cfg=None,
+):
+
+    def ranking(item):
+
+        return (
+            float(
+                item.get(
+                    "score",
+                    0,
+                )
+            )
+            + float(
+                item.get(
+                    "priority",
+                    0,
+                )
+            )
+            * 0.25
+            + float(
+                item.get(
+                    "entry_quality",
+                    0,
+                )
+            )
+            * 0.25
+        )
+
+    return sorted(
+        signals,
+        key=ranking,
+        reverse=True,
+        )

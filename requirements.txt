@@ -1,8 +1,4 @@
-
-
-
-
-
 ccxt
 pandas
 numpy
+requests

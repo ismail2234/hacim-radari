@@ -911,16 +911,18 @@ def analyze(
         ),
     )
 
+    
+        # =========================================================
+    # V28 KIVRIM ERKENLİK KATKISI
     # =========================================================
-    # V28 KIVRIM ERKENLÄ°K KATKISI
-    # =========================================================
-       kivrim_bonus = 0.0
 
-    if kivrim_stage == "KIVRIM Ã–NCÃœ":
+    kivrim_bonus = 0.0
+
+    if kivrim_stage == "KIVRIM ÖNCÜ":
         kivrim_bonus += kivrim_early_score * 0.35
-    elif kivrim_stage == "GÃœÃ‡LENEN KIVRIM":
+    elif kivrim_stage == "GÜÇLENEN KIVRIM":
         kivrim_bonus += kivrim_early_score * 0.30
-    elif kivrim_stage == "TEYÄ°T":
+    elif kivrim_stage == "TEYİT":
         kivrim_bonus += kivrim_early_score * 0.20
 
     if kivrim_turning:
@@ -938,10 +940,10 @@ def analyze(
     early_score = max(
         0,
         min(
-            round(early_score + kivrim_bonus),
+            early_score + kivrim_bonus,
             100,
         ),
-    )
+        )
 
     # =========================================================
     # SÄ°NYAL SEVÄ°YESÄ°

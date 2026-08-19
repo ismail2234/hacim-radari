@@ -914,4 +914,464 @@ def analyze(
     # =========================================================
     # V28 KIVRIM ERKENLÄ°K KATKISI
     # =========================================================
-    
+       kivrim_bonus = 0.0
+
+    if kivrim_stage == "KIVRIM Ã–NCÃœ":
+        kivrim_bonus += kivrim_early_score * 0.35
+    elif kivrim_stage == "GÃœÃ‡LENEN KIVRIM":
+        kivrim_bonus += kivrim_early_score * 0.30
+    elif kivrim_stage == "TEYÄ°T":
+        kivrim_bonus += kivrim_early_score * 0.20
+
+    if kivrim_turning:
+        kivrim_bonus += 8
+
+    if kivrim_pre_turn:
+        kivrim_bonus += 5
+
+    if kivrim_accelerating:
+        kivrim_bonus += 5
+
+    if kivrim_higher_low:
+        kivrim_bonus += 5
+
+    early_score = max(
+        0,
+        min(
+            round(early_score + kivrim_bonus),
+            100,
+        ),
+    )
+
+    # =========================================================
+    # SÄ°NYAL SEVÄ°YESÄ°
+    # =========================================================
+
+    status = "PASS"
+
+    # KÄ±vrÄ±m ana motorudur. V27 gÃ¶stergeleri ilk kÄ±vrÄ±mÄ±
+    # engellemez; sonraki aÅŸamalarda teyit gÃ¶revi gÃ¶rÃ¼r.
+    early_core = (
+        kivrim_core
+        and not chase_risk
+    )
+
+    technical_core = (
+        macd_ok
+        and di_ok
+        and price_above_vwap
+    )
+
+    early_support = (
+        kivrim_turning
+        or kivrim_pre_turn
+        or kivrim_higher_low
+        or kivrim_rsi_turning
+        or kivrim_macd_recovering
+        or kivrim_volume_start
+        or kivrim_reclaim_ema7
+    )
+
+    if (
+        kivrim_stage == "KIVRIM Ã–NCÃœ"
+        and early_core
+        and early_support
+        and early_score >= 45
+    ):
+        status = "ONCU"
+
+    if (
+        status == "ONCU"
+        and kivrim_stage in (
+            "GÃœÃ‡LENEN KIVRIM",
+            "TEYÄ°T",
+        )
+        and early_score >= 55
+        and (
+            technical_core
+            or kivrim_accelerating
+            or kivrim_rsi_turning
+            or kivrim_macd_recovering
+            or vwap_reclaim
+            or macd_turn
+        )
+    ):
+        status = "BUY"
+
+    if (
+        status == "BUY"
+        and kivrim_stage == "TEYÄ°T"
+        and kivrim_early_score >= 70
+        and early_score >= 70
+        and (
+            volume_strong
+            or kivrim_volume_start
+        )
+        and rv < 65
+    ):
+        status = "VERY"
+
+    if chase_risk:
+        status = "PASS"
+
+    if rsi_extended:
+        status = "PASS"
+
+    if move_3 >= 8:
+        status = "PASS"
+
+    # =========================================================
+    # STOP
+    # =========================================================
+
+    stop = fib786
+
+    if (
+        stop <= 0
+        or stop >= price
+    ):
+        stop = price * 0.99
+
+    stop_distance = (
+        abs(price - stop)
+        / price
+        * 100
+    )
+
+    # =========================================================
+    # TEYÄ°T
+    # =========================================================
+
+    streak = get_streak(
+        dbs,
+        symbol,
+    )
+
+    # =========================================================
+    # Ã–NCELÄ°K
+    # =========================================================
+
+    priority = (
+        early_score * 0.45
+        + kivrim_early_score * 0.30
+        + score * 0.25
+    )
+
+    if kivrim_turning:
+        priority += 8
+
+    if kivrim_pre_turn:
+        priority += 5
+
+    if kivrim_accelerating:
+        priority += 5
+
+    if kivrim_higher_low:
+        priority += 5
+
+    if fib_poc:
+        priority += 3
+
+    if macd_turn:
+        priority += 3
+
+    if vwap_reclaim:
+        priority += 3
+
+    priority = min(
+        priority,
+        100,
+    )
+
+    entry_quality = (
+        early_score * 0.50
+        + kivrim_early_score * 0.30
+        + score * 0.20
+    )
+
+    entry_quality = min(
+        entry_quality,
+        100,
+    )
+
+    # =========================================================
+    # SONUÃ‡
+    # =========================================================
+
+    return {
+        "symbol": symbol,
+        "status": status,
+        "price": price,
+
+        "score": round(score, 2),
+        "early_score": round(
+            early_score,
+            2,
+        ),
+        "early_profile_score": round(
+            early_profile_score,
+            2,
+        ),
+
+        "priority": round(
+            priority,
+            2,
+        ),
+
+        "entry_quality": round(
+            entry_quality,
+            2,
+        ),
+
+        # =====================================================
+        # V28 KIVRIM SONUÃ‡LARI
+        # =====================================================
+
+        "kivrim_score":
+            kivrim_score,
+
+        "kivrim_early_score":
+            kivrim_early_score,
+
+        "kivrim_stage":
+            kivrim_stage,
+
+        "kivrim_turning":
+            kivrim_turning,
+
+        "kivrim_pre_turn":
+            kivrim_pre_turn,
+
+        "kivrim_accelerating":
+            kivrim_accelerating,
+
+        "kivrim_higher_low":
+            kivrim_higher_low,
+
+        "kivrim_rsi_turning":
+            kivrim_rsi_turning,
+
+        "kivrim_macd_recovering":
+            kivrim_macd_recovering,
+
+        "kivrim_volume_start":
+            kivrim_volume_start,
+
+        "kivrim_reclaim_ema7":
+            kivrim_reclaim_ema7,
+
+        "kivrim_reasons":
+            kivrim_reasons,
+
+        "kivrim_reasons_text":
+            ", ".join(
+                kivrim_reasons
+            ),
+
+        "ichimoku_bullish":
+            ichimoku_bullish,
+
+        "above_cloud":
+            above_cloud,
+
+        "fib_0_5":
+            fib50,
+
+        "fib_0_618":
+            fib618,
+
+        "fib_0_786":
+            fib786,
+
+        "fib_zone":
+            fib_zone,
+
+        "fib_618_near":
+            fib618_near,
+
+        "fib_786_near":
+            fib786_near,
+
+        "poc":
+            poc,
+
+        "va_low":
+            va_low,
+
+        "va_high":
+            va_high,
+
+        "poc_distance":
+            poc_distance,
+
+        "fib_poc":
+            fib_poc,
+
+        "td_setup":
+            td,
+
+        "td_direction":
+            td_direction,
+
+        "td_9":
+            td_9,
+
+        "td_13":
+            td_13,
+
+        "volume_ratio":
+            vr,
+
+        "impulse":
+            impulse,
+
+        "rsi":
+            rv,
+
+        "rsi_rising":
+            rsi_rising,
+
+        "macd":
+            macd_ok,
+
+        "macd_turn":
+            macd_turn,
+
+        "macd_line":
+            macd_line,
+
+        "macd_signal":
+            macd_signal,
+
+        "macd_hist":
+            macd_hist,
+
+        "adx":
+            ad_value,
+
+        "plus_di":
+            plus_di,
+
+        "minus_di":
+            minus_di,
+
+        "adx_ok":
+            adx_ok,
+
+        "di_ok":
+            di_ok,
+
+        "vwap":
+            vwap_value,
+
+        "price_above_vwap":
+            price_above_vwap,
+
+        "vwap_reclaim":
+            vwap_reclaim,
+
+        "squeeze":
+            squeeze,
+
+        "breakout":
+            breakout,
+
+        "early_breakout":
+            early_breakout,
+
+        "distance_from_high":
+            distance_from_high,
+
+        "move_3":
+            move_3,
+
+        "early_profile":
+            early_profile,
+
+        "early_profile_text":
+            ", ".join(
+                early_profile
+            ),
+
+        "stop":
+            stop,
+
+        "stop_loss":
+            stop,
+
+        "stop_distance":
+            stop_distance,
+
+        "criteria":
+            criteria,
+
+        "criteria_list":
+            criteria,
+
+        "streak":
+            streak,
+
+        "previous_signal":
+            (
+                "Ä°lk sinyal"
+                if streak <= 1
+                else f"{streak - 1}. teyit"
+            ),
+    }
+
+
+def rank_signals(
+    signals,
+    cfg=None,
+):
+    valid = [
+        item
+        for item in signals
+        if item.get("status")
+        in (
+            "ONCU",
+            "BUY",
+            "VERY",
+        )
+    ]
+
+    return sorted(
+        valid,
+        key=lambda item: (
+            float(
+                item.get(
+                    "kivrim_early_score",
+                    0,
+                )
+            ) * 0.30
+            +
+            float(
+                item.get(
+                    "early_score",
+                    0,
+                )
+            ) * 0.30
+            +
+            float(
+                item.get(
+                    "priority",
+                    0,
+                )
+            ) * 0.20
+            +
+            float(
+                item.get(
+                    "score",
+                    0,
+                )
+            ) * 0.10
+            +
+            float(
+                item.get(
+                    "early_profile_score",
+                    0,
+                )
+            ) * 0.10
+        ),
+        reverse=True,
+        ) 

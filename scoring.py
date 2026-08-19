@@ -465,3 +465,453 @@ def analyze(
 
     if len(closes) >= 5:
         try:
+            old_macd = macd(
+                closes[:-3]
+            )
+
+            old_line = num(
+                old_macd[0]
+            )
+
+            old_signal = num(
+                old_macd[1]
+            )
+
+            macd_turn = (
+                macd_line > macd_signal
+                and old_line <= old_signal
+            )
+        except Exception:
+            macd_turn = False
+
+    # =========================================================
+    # ADX
+    # =========================================================
+
+    adx_data = adx(
+        highs,
+        lows,
+        closes,
+    )
+
+    ad_value = 0.0
+    plus_di = 0.0
+    minus_di = 0.0
+
+    if isinstance(
+        adx_data,
+        (tuple, list),
+    ):
+        if len(adx_data) >= 1:
+            ad_value = num(
+                adx_data[0]
+            )
+
+        if len(adx_data) >= 2:
+            plus_di = num(
+                adx_data[1]
+            )
+
+        if len(adx_data) >= 3:
+            minus_di = num(
+                adx_data[2]
+            )
+
+    adx_ok = (
+        ad_value >= 18
+    )
+
+    di_ok = (
+        plus_di > minus_di
+    )
+
+    # =========================================================
+    # VWAP
+    # =========================================================
+
+    vwap_value = num(
+        vwap(
+            highs,
+            lows,
+            closes,
+            volumes,
+        )
+    )
+
+    price_above_vwap = (
+        vwap_value > 0
+        and price >= vwap_value
+    )
+
+    # =========================================================
+    # VWAP GERÄ° ALIM
+    # =========================================================
+
+    vwap_reclaim = False
+
+    if (
+        vwap_value > 0
+        and len(closes) >= 3
+    ):
+        vwap_reclaim = (
+            closes[-2] < vwap_value
+            and closes[-1] >= vwap_value
+        )
+
+    # =========================================================
+    # SIKIÅÂMA / EARLY BREAKOUT
+    # =========================================================
+
+    squeeze = False
+    breakout = False
+    early_breakout = False
+
+    if len(closes) >= 25:
+        recent_high = max(
+            highs[-20:-1]
+        )
+
+        recent_low = min(
+            lows[-20:-1]
+        )
+
+        range_percent = (
+            (recent_high - recent_low)
+            / price
+            * 100
+        )
+
+        squeeze = (
+            range_percent <= 6.0
+        )
+
+        breakout = (
+            price > recent_high
+        )
+
+        previous_high = max(
+            highs[-5:-1]
+        )
+
+        early_breakout = (
+            price > previous_high
+            and not rsi_extended
+        )
+
+    # =========================================================
+    # Ä°LK HACÄ°M Ä°VME
+    # =========================================================
+
+    volume_start = (
+        1.15 <= vr <= 3.5
+    )
+
+    volume_strong = (
+        1.5 <= vr <= 3.0
+    )
+
+    # =========================================================
+    # HAREKETÄ°N UZAKLIÃ„ÂI
+    # =========================================================
+
+    high_20 = max(
+        highs[-20:]
+    )
+
+    distance_from_high = (
+        high_20 - price
+    ) / price * 100
+
+    not_extended = (
+        distance_from_high >= 1.0
+    )
+
+    # Son 3 mumdaki hareket.
+    if len(closes) >= 4:
+        move_3 = (
+            closes[-1]
+            - closes[-4]
+        ) / closes[-4] * 100
+    else:
+        move_3 = 0.0
+
+    # Ã‡ok hÄ±zlÄ± yÃ¼kselmiÅŸse artÄ±k takip etmiyoruz.
+    chase_risk = (
+        move_3 >= 6.0
+        or rv >= 70
+    )
+
+    # =========================================================
+    # ERKEN HAREKET PROFÄ°LÄ°
+    #
+    # TREE Ã¶rneÄŸindeki gibi:
+    # sÄ±kÄ±ÅŸma -> ilk hacim -> VWAP -> momentum -> breakout
+    # =========================================================
+
+    early_profile_score = 0
+
+    early_profile = []
+
+    if squeeze:
+        early_profile_score += 15
+        early_profile.append(
+            "SÄ±kÄ±ÅŸma"
+        )
+
+    if volume_start:
+        early_profile_score += 10
+        early_profile.append(
+            "Ä°lk hacim"
+        )
+
+    if volume_strong:
+        early_profile_score += 5
+
+    if price_above_vwap:
+        early_profile_score += 10
+        early_profile.append(
+            "VWAP"
+        )
+
+    if vwap_reclaim:
+        early_profile_score += 12
+        early_profile.append(
+            "VWAP geri alÄ±m"
+        )
+
+    if macd_turn:
+        early_profile_score += 12
+        early_profile.append(
+            "MACD dÃ¶nÃ¼ÅŸ"
+        )
+
+    if macd_ok:
+        early_profile_score += 6
+        early_profile.append(
+            "MACD"
+        )
+
+    if rsi_early:
+        early_profile_score += 10
+        early_profile.append(
+            "RSI erken"
+        )
+
+    if rsi_rising:
+        early_profile_score += 5
+        early_profile.append(
+            "RSI yÃ¼kseliyor"
+        )
+
+    if early_breakout:
+        early_profile_score += 12
+        early_profile.append(
+            "Ä°lk kÄ±rÄ±lma"
+        )
+
+    if breakout:
+        early_profile_score += 5
+
+    if not_extended:
+        early_profile_score += 8
+        early_profile.append(
+            "Hareket uzamamÄ±ÅŸ"
+        )
+
+    early_profile_score = min(
+        early_profile_score,
+        100,
+    )
+
+    # =========================================================
+    # TEKNÄ°K SKOR
+    # =========================================================
+
+    score = 0
+    criteria = []
+
+    if ichimoku_bullish:
+        score += 12
+        criteria.append(
+            "Ichimoku yÃ¼kseliÅŸ"
+        )
+
+    if above_cloud:
+        score += 6
+        criteria.append(
+            "Bulut Ã¼stÃ¼"
+        )
+
+    if fib786_near:
+        score += 12
+        criteria.append(
+            "Fib 0.786"
+        )
+
+    elif fib618_near:
+        score += 10
+        criteria.append(
+            "Fib 0.618"
+        )
+
+    elif fib_zone:
+        score += 6
+        criteria.append(
+            "Fib bÃ¶lgesi"
+        )
+
+    if poc_near:
+        score += 10
+        criteria.append(
+            "POC yakÄ±n"
+        )
+
+    if fib_poc:
+        score += 12
+        criteria.append(
+            "Fib+POC kesiÅŸimi"
+        )
+
+    if volume_start:
+        score += 8
+        criteria.append(
+            f"Hacim {vr:.1f}x"
+        )
+
+    if rsi_early:
+        score += 8
+        criteria.append(
+            "RSI erken"
+        )
+
+    elif 45 <= rv <= 65:
+        score += 4
+        criteria.append(
+            "RSI"
+        )
+
+    if rsi_rising:
+        score += 4
+        criteria.append(
+            "RSI yÃ¼kseliyor"
+        )
+
+    if macd_ok:
+        score += 7
+        criteria.append(
+            "MACD"
+        )
+
+    if macd_turn:
+        score += 5
+        criteria.append(
+            "MACD dÃ¶nÃ¼ÅŸ"
+        )
+
+    if adx_ok:
+        score += 5
+        criteria.append(
+            "ADX"
+        )
+
+    if di_ok:
+        score += 5
+        criteria.append(
+            "+DI"
+        )
+
+    if price_above_vwap:
+        score += 5
+        criteria.append(
+            "VWAP"
+        )
+
+    if squeeze:
+        score += 5
+        criteria.append(
+            "SÄ±kÄ±ÅŸma"
+        )
+
+    if early_breakout:
+        score += 7
+        criteria.append(
+            "Ä°lk kÄ±rÄ±lma"
+        )
+
+    if td_9:
+        score += 2
+        criteria.append(
+            "TD9"
+        )
+
+    if td_13:
+        score += 2
+        criteria.append(
+            "TD13"
+        )
+
+    score = min(
+        score,
+        100,
+    )
+
+    # =========================================================
+    # ERKENLÄ°K PUANI
+    # =========================================================
+
+    early_score = early_profile_score
+
+    if fib_poc:
+        early_score += 8
+
+    if fib786_near:
+        early_score += 8
+
+    elif fib618_near:
+        early_score += 6
+
+    if poc_near:
+        early_score += 5
+
+    if ichimoku_bullish:
+        early_score += 4
+
+    if di_ok:
+        early_score += 3
+
+    early_score = min(
+        early_score,
+        100,
+    )
+
+    # =========================================================
+    # GEÃ‡ KALMA CEZASI
+    # =========================================================
+
+    if rv >= 65:
+        early_score -= 10
+
+    if rv >= 70:
+        early_score -= 25
+
+    if move_3 >= 4:
+        early_score -= 10
+
+    if move_3 >= 6:
+        early_score -= 25
+
+    if distance_from_high < 1:
+        early_score -= 15
+
+    early_score = max(
+        0,
+        min(
+            early_score,
+            100,
+        ),
+    )
+
+    # =========================================================
+    # V28 KIVRIM ERKENLÄ°K KATKISI
+    # =========================================================
+    

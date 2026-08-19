@@ -79,7 +79,7 @@ def candidates(data):
         key=lambda x: x["volume"] * (1 + max(x["chg"], 0) / 100),
         reverse=True,
     )
-    return result[:SETTINGS.shortlist_size]
+    rreturn result
 
 
 def analyze_one(item):

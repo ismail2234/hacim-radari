@@ -642,3 +642,688 @@ def analyze(
     if price_above_vwap:
         early_profile_score += 10
         early_profile.append(
+            "VWAP"
+        )
+
+    if vwap_reclaim:
+        early_profile_score += 12
+        early_profile.append(
+            "VWAP geri alÄ±m"
+        )
+
+    if macd_turn:
+        early_profile_score += 12
+        early_profile.append(
+            "MACD dÃ¶nÃ¼ÅŸ"
+        )
+
+    if macd_ok:
+        early_profile_score += 6
+        early_profile.append(
+            "MACD"
+        )
+
+    if rsi_early:
+        early_profile_score += 10
+        early_profile.append(
+            "RSI erken"
+        )
+
+    if rsi_rising:
+        early_profile_score += 5
+        early_profile.append(
+            "RSI yÃ¼kseliyor"
+        )
+
+    if early_breakout:
+        early_profile_score += 12
+        early_profile.append(
+            "Ä°lk kÄ±rÄ±lma"
+        )
+
+    if breakout:
+        early_profile_score += 5
+
+    if not_extended:
+        early_profile_score += 8
+        early_profile.append(
+            "Hareket uzamamÄ±ÅŸ"
+        )
+
+    early_profile_score = min(
+        early_profile_score,
+        100,
+    )
+
+    # =========================================================
+    # TEKNÄ°K SKOR
+    # =========================================================
+
+    score = 0
+    criteria = []
+
+    if ichimoku_bullish:
+        score += 12
+        criteria.append(
+            "Ichimoku yÃ¼kseliÅŸ"
+        )
+
+    if above_cloud:
+        score += 6
+        criteria.append(
+            "Bulut Ã¼stÃ¼"
+        )
+
+    if fib786_near:
+        score += 12
+        criteria.append(
+            "Fib 0.786"
+        )
+
+    elif fib618_near:
+        score += 10
+        criteria.append(
+            "Fib 0.618"
+        )
+
+    elif fib_zone:
+        score += 6
+        criteria.append(
+            "Fib bÃ¶lgesi"
+        )
+
+    if poc_near:
+        score += 10
+        criteria.append(
+            "POC yakÄ±n"
+        )
+
+    if fib_poc:
+        score += 12
+        criteria.append(
+            "Fib+POC kesiÅŸimi"
+        )
+
+    if volume_start:
+        score += 8
+        criteria.append(
+            f"Hacim {vr:.1f}x"
+        )
+
+    if rsi_early:
+        score += 8
+        criteria.append(
+            "RSI erken"
+        )
+
+    elif 45 <= rv <= 65:
+        score += 4
+        criteria.append(
+            "RSI"
+        )
+
+    if rsi_rising:
+        score += 4
+        criteria.append(
+            "RSI yÃ¼kseliyor"
+        )
+
+    if macd_ok:
+        score += 7
+        criteria.append(
+            "MACD"
+        )
+
+    if macd_turn:
+        score += 5
+        criteria.append(
+            "MACD dÃ¶nÃ¼ÅŸ"
+        )
+
+    if adx_ok:
+        score += 5
+        criteria.append(
+            "ADX"
+        )
+
+    if di_ok:
+        score += 5
+        criteria.append(
+            "+DI"
+        )
+
+    if price_above_vwap:
+        score += 5
+        criteria.append(
+            "VWAP"
+        )
+
+    if squeeze:
+        score += 5
+        criteria.append(
+            "SÄ±kÄ±ÅŸma"
+        )
+
+    if early_breakout:
+        score += 7
+        criteria.append(
+            "Ä°lk kÄ±rÄ±lma"
+        )
+
+    if td_9:
+        score += 2
+        criteria.append(
+            "TD9"
+        )
+
+    if td_13:
+        score += 2
+        criteria.append(
+            "TD13"
+        )
+
+    score = min(
+        score,
+        100,
+    )
+
+    # =========================================================
+    # ERKENLÄ°K PUANI
+    # =========================================================
+
+    early_score = early_profile_score
+
+    if fib_poc:
+        early_score += 8
+
+    if fib786_near:
+        early_score += 8
+
+    elif fib618_near:
+        early_score += 6
+
+    if poc_near:
+        early_score += 5
+
+    if ichimoku_bullish:
+        early_score += 4
+
+    if di_ok:
+        early_score += 3
+
+    early_score = min(
+        early_score,
+        100,
+    )
+
+    # =========================================================
+    # GEÃ‡ KALMA CEZASI
+    # =========================================================
+
+    if rv >= 65:
+        early_score -= 10
+
+    if rv >= 70:
+        early_score -= 25
+
+    if move_3 >= 4:
+        early_score -= 10
+
+    if move_3 >= 6:
+        early_score -= 25
+
+    if distance_from_high < 1:
+        early_score -= 15
+
+    early_score = max(
+        0,
+        min(
+            early_score,
+            100,
+        ),
+    )
+
+    # =========================================================
+    # V28 KIVRIM ERKENLÄ°K KATKISI
+    # =========================================================
+
+    if kivrim_stage == "KIVRIM Ã–NCÃœ":
+        early_score += kivrim_early_score * 0.20
+
+    elif kivrim_stage == "GÃœÃ‡LENEN KIVRIM":
+        early_score += kivrim_early_score * 0.30
+
+    elif kivrim_stage == "TEYÄ°T":
+        early_score += kivrim_early_score * 0.35
+
+    early_score = max(
+        0,
+        min(
+            round(early_score),
+            100,
+        ),
+    )
+
+    # =========================================================
+    # SÄ°NYAL SEVÄ°YESÄ°
+    # =========================================================
+
+    status = "PASS"
+
+    early_core = (
+        volume_start
+        and rsi_early
+        and not chase_risk
+    )
+
+    technical_core = (
+        macd_ok
+        and di_ok
+        and price_above_vwap
+    )
+
+    if (
+        kivrim_core
+        and early_core
+        and early_profile_score >= 45
+        and early_score >= 55
+        and (
+            fib_poc
+            or
+            fib_zone
+            or
+            poc_near
+            or
+            early_breakout
+            or
+            kivrim_turning
+            or
+            kivrim_pre_turn
+        )
+    ):
+        status = "ONCU"
+
+    if (
+        status == "ONCU"
+        and kivrim_stage in (
+            "GÃœÃ‡LENEN KIVRIM",
+            "TEYÄ°T",
+        )
+        and technical_core
+        and early_score >= 65
+        and (
+            fib_poc
+            or
+            vwap_reclaim
+            or
+            macd_turn
+            or
+            kivrim_accelerating
+        )
+    ):
+        status = "BUY"
+
+    if (
+        status == "BUY"
+        and kivrim_stage == "TEYÄ°T"
+        and early_score >= 78
+        and (
+            fib_poc
+            or
+            kivrim_higher_low
+        )
+        and volume_strong
+        and not td_13
+        and rv < 62
+    ):
+        status = "VERY"
+
+    # AÅŸÄ±rÄ± yÃ¼kselmiÅŸ coinleri kovalamÄ±yoruz.
+    if chase_risk:
+        status = "PASS"
+
+    if rsi_extended:
+        status = "PASS"
+
+    if move_3 >= 8:
+        status = "PASS"
+
+    # =========================================================
+    # STOP
+    # =========================================================
+
+    stop = fib786
+
+    if (
+        stop <= 0
+        or stop >= price
+    ):
+        stop = price * 0.99
+
+    stop_distance = (
+        abs(price - stop)
+        / price
+        * 100
+    )
+
+    # =========================================================
+    # TEYÄ°T
+    # =========================================================
+
+    streak = get_streak(
+        dbs,
+        symbol,
+    )
+
+    # =========================================================
+    # Ã–NCELÄ°K
+    # =========================================================
+
+    priority = (
+        early_score * 0.60
+        + score * 0.40
+    )
+
+    if fib_poc:
+        priority += 5
+
+    if macd_turn:
+        priority += 5
+
+    if vwap_reclaim:
+        priority += 5
+
+    if kivrim_turning:
+        priority += 8
+
+    elif kivrim_pre_turn:
+        priority += 5
+
+    if kivrim_stage == "TEYÄ°T":
+        priority += 5
+
+    priority = min(
+        priority,
+        100,
+    )
+
+    entry_quality = (
+        early_score * 0.60
+        + score * 0.25
+        + kivrim_early_score * 0.15
+    )
+
+    entry_quality = min(
+        entry_quality,
+        100,
+    )
+
+    # =========================================================
+    # SONUÃ‡
+    # =========================================================
+
+    return {
+        "symbol": symbol,
+        "status": status,
+        "price": price,
+
+        "score": round(score, 2),
+        "early_score": round(
+            early_score,
+            2,
+        ),
+        "early_profile_score": round(
+            early_profile_score,
+            2,
+        ),
+
+        "priority": round(
+            priority,
+            2,
+        ),
+
+        "entry_quality": round(
+            entry_quality,
+            2,
+        ),
+
+        # =====================================================
+        # V28 KIVRIM SONUÃ‡LARI
+        # =====================================================
+
+        "kivrim_score":
+            kivrim_score,
+
+        "kivrim_early_score":
+            kivrim_early_score,
+
+        "kivrim_stage":
+            kivrim_stage,
+
+        "kivrim_turning":
+            kivrim_turning,
+
+        "kivrim_pre_turn":
+            kivrim_pre_turn,
+
+        "kivrim_accelerating":
+            kivrim_accelerating,
+
+        "kivrim_higher_low":
+            kivrim_higher_low,
+
+        "kivrim_reasons":
+            kivrim_reasons,
+
+        "kivrim_reasons_text":
+            ", ".join(
+                kivrim_reasons
+            ),
+
+        "ichimoku_bullish":
+            ichimoku_bullish,
+
+        "above_cloud":
+            above_cloud,
+
+        "fib_0_5":
+            fib50,
+
+        "fib_0_618":
+            fib618,
+
+        "fib_0_786":
+            fib786,
+
+        "fib_zone":
+            fib_zone,
+
+        "fib_618_near":
+            fib618_near,
+
+        "fib_786_near":
+            fib786_near,
+
+        "poc":
+            poc,
+
+        "va_low":
+            va_low,
+
+        "va_high":
+            va_high,
+
+        "poc_distance":
+            poc_distance,
+
+        "fib_poc":
+            fib_poc,
+
+        "td_setup":
+            td,
+
+        "td_direction":
+            td_direction,
+
+        "td_9":
+            td_9,
+
+        "td_13":
+            td_13,
+
+        "volume_ratio":
+            vr,
+
+        "impulse":
+            impulse,
+
+        "rsi":
+            rv,
+
+        "rsi_rising":
+            rsi_rising,
+
+        "macd":
+            macd_ok,
+
+        "macd_turn":
+            macd_turn,
+
+        "macd_line":
+            macd_line,
+
+        "macd_signal":
+            macd_signal,
+
+        "macd_hist":
+            macd_hist,
+
+        "adx":
+            ad_value,
+
+        "plus_di":
+            plus_di,
+
+        "minus_di":
+            minus_di,
+
+        "adx_ok":
+            adx_ok,
+
+        "di_ok":
+            di_ok,
+
+        "vwap":
+            vwap_value,
+
+        "price_above_vwap":
+            price_above_vwap,
+
+        "vwap_reclaim":
+            vwap_reclaim,
+
+        "squeeze":
+            squeeze,
+
+        "breakout":
+            breakout,
+
+        "early_breakout":
+            early_breakout,
+
+        "distance_from_high":
+            distance_from_high,
+
+        "move_3":
+            move_3,
+
+        "early_profile":
+            early_profile,
+
+        "early_profile_text":
+            ", ".join(
+                early_profile
+            ),
+
+        "stop":
+            stop,
+
+        "stop_loss":
+            stop,
+
+        "stop_distance":
+            stop_distance,
+
+        "criteria":
+            criteria,
+
+        "criteria_list":
+            criteria,
+
+        "streak":
+            streak,
+
+        "previous_signal":
+            (
+                "Ä°lk sinyal"
+                if streak <= 1
+                else f"{streak - 1}. teyit"
+            ),
+    }
+
+
+def rank_signals(
+    signals,
+    cfg=None,
+):
+    valid = [
+        item
+        for item in signals
+        if item.get("status")
+        in (
+            "ONCU",
+            "BUY",
+            "VERY",
+        )
+    ]
+
+    return sorted(
+        valid,
+        key=lambda item: (
+            float(
+                item.get(
+                    "early_score",
+                    0,
+                )
+            ) * 0.50
+            +
+            float(
+                item.get(
+                    "early_profile_score",
+                    0,
+                )
+            ) * 0.20
+            +
+            float(
+                item.get(
+                    "kivrim_early_score",
+                    0,
+                )
+            ) * 0.15
+            +
+            float(
+                item.get(
+                    "score",
+                    0,
+                )
+            ) * 0.10
+            +
+            float(
+                item.get(
+                    "priority",
+                    0,
+                )
+            ) * 0.10
+        ),
+        reverse=True,
+                )

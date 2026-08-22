@@ -67,31 +67,38 @@ def macd(values, fast=12, slow=26, signal=9):
     if len(values) < slow + signal:
         return 0.0, 0.0, 0.0
 
-    fast_values = []
-    slow_values = []
+    # Optimization: Calculate fast and slow EMAs in a single O(n) pass
+    # instead of recomputing ema(values[:i+1]) at each index (which was O(n^2)).
+    k_fast = 2 / (fast + 1)
+    k_slow = 2 / (slow + 1)
 
-    for i in range(len(values)):
-        fast_values.append(
-            ema(
-                values[:i + 1],
-                fast,
-            )
-        )
+    fast_val = 0.0
+    slow_val = 0.0
+    s_fast = 0.0
+    s_slow = 0.0
 
-        slow_values.append(
-            ema(
-                values[:i + 1],
-                slow,
-            )
-        )
+    line = [0.0] * len(values)
 
-    line = [
-        a - b
-        for a, b in zip(
-            fast_values,
-            slow_values,
-        )
-    ]
+    for i, price in enumerate(values):
+        if i < fast - 1:
+            s_fast += price
+            fast_val = s_fast / (i + 1)
+        elif i == fast - 1:
+            s_fast += price
+            fast_val = s_fast / fast
+        else:
+            fast_val = price * k_fast + fast_val * (1 - k_fast)
+
+        if i < slow - 1:
+            s_slow += price
+            slow_val = s_slow / (i + 1)
+        elif i == slow - 1:
+            s_slow += price
+            slow_val = s_slow / slow
+        else:
+            slow_val = price * k_slow + slow_val * (1 - k_slow)
+
+        line[i] = fast_val - slow_val
 
     signal_line = ema(
         line,

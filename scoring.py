@@ -627,10 +627,10 @@ def analyze(cfg, client, dbs, market, item):
         early_score -= 20
 
     if wide_late:
-        early_score -= 30
+    early_score -= 15
 
-    if wide_top:
-        early_score -= 20
+if wide_top:
+    early_score -= 10
 
     early_score = max(
         0,

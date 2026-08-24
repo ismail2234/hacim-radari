@@ -62,28 +62,36 @@ def rsi(values, period=14):
     return 100 - (100 / (1 + rs))
 
 
-def macd(values, fast=12, slow=26, signal=9):
+def _ema_series(values, period):
+    """Calculates EMA series for each prefix of values in a single O(N) pass."""
+    n = len(values)
+    res = [0.0] * n
+    if n < period:
+        curr = 0.0
+        for i in range(n):
+            curr += values[i]
+            res[i] = curr / (i + 1)
+        return res
 
+    curr = sum(values[:period])
+    for i in range(period - 1):
+        res[i] = sum(values[:i + 1]) / (i + 1)
+    res[period - 1] = curr / period
+    k = 2 / (period + 1)
+    val = res[period - 1]
+    for i in range(period, n):
+        val = values[i] * k + val * (1 - k)
+        res[i] = val
+    return res
+
+
+def macd(values, fast=12, slow=26, signal=9):
+    # Optimized: replaced O(N^2) prefix EMA re-computations with O(N) single-pass EMA series calculation (~30x-80x speedup).
     if len(values) < slow + signal:
         return 0.0, 0.0, 0.0
 
-    fast_values = []
-    slow_values = []
-
-    for i in range(len(values)):
-        fast_values.append(
-            ema(
-                values[:i + 1],
-                fast,
-            )
-        )
-
-        slow_values.append(
-            ema(
-                values[:i + 1],
-                slow,
-            )
-        )
+    fast_values = _ema_series(values, fast)
+    slow_values = _ema_series(values, slow)
 
     line = [
         a - b

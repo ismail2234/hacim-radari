@@ -562,3 +562,302 @@ def analyze(cfg, client, dbs, market, item):
         0,
         min(100, score),
     )
+    # =====================================================
+    # EARLY SCORE
+    # =====================================================
+
+    early_score = ke
+
+    if pre:
+        early_score += 8
+
+    if turn:
+        early_score += 5
+
+    if higher:
+        early_score += 6
+
+    if krsi:
+        early_score += 6
+
+    if kmacd:
+        early_score += 6
+
+    if kvol:
+        early_score += 7
+
+    if first_volume:
+        early_score += 5
+
+    if early_gate:
+        early_score += 10
+
+    if pre_signal:
+        early_score += 8
+
+    if very_early:
+        early_score += 12
+
+    # =====================================================
+    # GEC KALMA CEZALARI
+    # =====================================================
+
+    if move3 >= 3:
+        early_score -= 15
+
+    if move6 >= 5:
+        early_score -= 15
+
+    if move12 >= 8:
+        early_score -= 20
+
+    if from_low12 >= 8:
+        early_score -= 20
+
+    if from_low20 >= 10:
+        early_score -= 10
+
+    if high_distance <= 2:
+        early_score -= 20
+
+    if rv >= 65:
+        early_score -= 20
+
+    if vr >= 3:
+        early_score -= 20
+
+    if wide_late:
+        early_score -= 30
+
+    if wide_top:
+        early_score -= 20
+
+    early_score = max(
+        0,
+        min(100, early_score),
+    )
+
+    # =====================================================
+    # STATUS
+    # =====================================================
+
+    if late:
+        status = "PASS"
+
+    elif (
+        very_early
+        and early_score >= 66
+        and score >= 60
+    ):
+        status = "VERY"
+
+    elif (
+        early_gate
+        and early_score >= 60
+        and score >= 56
+    ):
+        status = "BUY"
+
+    elif (
+        pre_signal
+        and early_score >= 56
+        and score >= 53
+    ):
+        status = "ONCU"
+
+    elif (
+        early_gate
+        and early_score >= 56
+        and score >= 53
+    ):
+        status = "ONCU"
+
+    else:
+        status = "PASS"
+
+    # =====================================================
+    # STOP
+    # =====================================================
+
+    stop = min(
+        lows[-12:]
+    ) * 0.995
+
+    if stop <= 0 or stop >= price:
+        stop = price * 0.98
+
+    stop_distance = (
+        (price - stop)
+        / price
+        * 100
+    )
+
+    # =====================================================
+    # RESULT
+    # =====================================================
+
+    return {
+        "symbol": symbol,
+        "price": price,
+
+        "status": status,
+        "score": score,
+        "priority": score,
+
+        "streak": streak(
+            dbs,
+            symbol,
+        ),
+
+        # KIVRIM
+        "kivrim_score": ks,
+        "kivrim_early_score": early_score,
+        "kivrim_stage": stage,
+
+        "kivrim_turning": turn,
+        "kivrim_pre_turn": pre,
+        "kivrim_accelerating": accel,
+        "kivrim_higher_low": higher,
+
+        "kivrim_rsi_turning": krsi,
+        "kivrim_macd_recovering": kmacd,
+        "kivrim_volume_start": kvol,
+        "kivrim_reclaim_ema7": reclaim,
+
+        "kivrim_reasons": k.get(
+            "reasons",
+            [],
+        ),
+
+        "kivrim_reasons_text": k.get(
+            "reasons_text",
+            "",
+        ),
+
+        # V29
+        "v29_early_gate": early_gate,
+        "v29_pre_signal": pre_signal,
+        "v29_very_early": very_early,
+        "v29_first_volume": first_volume,
+
+        # ICHIMOKU
+        "ichimoku_bullish": ich_bull,
+        "bullish": ich_bull,
+        "above_cloud": above_cloud,
+
+        # FIB
+        "fib_0_5": f50,
+        "fib_0_618": f618,
+        "fib_0_786": f786,
+
+        "fib50": f50,
+        "fib618": f618,
+        "fib786": f786,
+
+        "fib_zone": fib_zone,
+        "fib_poc": fib_poc,
+
+        # VOLUME PROFILE
+        "poc": poc,
+        "value_low": va_low,
+        "value_high": va_high,
+
+        "va_low": va_low,
+        "va_high": va_high,
+
+        # TD
+        "td": td,
+        "td_setup": td,
+        "td_direction": td_direction,
+
+        # INDICATORS
+        "volume_ratio": vr,
+        "vr": vr,
+
+        "rsi": rv,
+        "rv": rv,
+
+        "macd": macd_ok,
+        "macd_hist": mh,
+
+        "adx": adval,
+        "ad": adval,
+
+        "price_above_vwap": above_vwap,
+        "vwap": vw,
+
+        # STOP
+        "stop_loss": stop,
+        "stop": stop,
+        "stop_distance": stop_distance,
+
+        "trap": late,
+
+        # CRITERIA
+        "criteria": criteria,
+        "criteria_list": criteria,
+
+        # MOVEMENT
+        "move_3": move3,
+        "move_6": move6,
+        "move_12": move12,
+
+        "from_low_12": from_low12,
+        "from_low_20": from_low20,
+
+        "wide_from_low": wide_from_low,
+        "wide_from_high": wide_from_high,
+
+        "high_distance": high_distance,
+        "late": late,
+    }
+
+
+def rank_signals(
+    signals,
+    cfg=None,
+):
+
+    order = {
+        "VERY": 3,
+        "BUY": 2,
+        "ONCU": 1,
+        "PASS": 0,
+    }
+
+    return sorted(
+        signals,
+        key=lambda x: (
+            order.get(
+                str(
+                    x.get(
+                        "status",
+                        "PASS",
+                    )
+                ),
+                0,
+            ),
+
+            num(
+                x.get(
+                    "kivrim_early_score",
+                    0,
+                )
+            ),
+
+            num(
+                x.get(
+                    "kivrim_score",
+                    0,
+                )
+            ),
+
+            num(
+                x.get(
+                    "score",
+                    0,
+                )
+            ),
+        ),
+        reverse=True,
+        )

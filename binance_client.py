@@ -152,3 +152,252 @@ class BinanceTRClient:
                 f"BINANCE HTTP ERROR | "
                 f"URL={url} | {exc}"
             ) from exc
+    # ========================================================
+    # SERVER TIME
+    # ========================================================
+
+    def get_server_time(self) -> Any:
+        url = (
+            f"{BINANCE_TR_BASE_URL}"
+            "/open/v1/common/time"
+        )
+
+        return self._get(url)
+
+    # ========================================================
+    # SYMBOLS
+    # ========================================================
+
+    def get_symbols(
+        self,
+    ) -> list[dict[str, Any]]:
+
+        url = (
+            f"{BINANCE_TR_BASE_URL}"
+            "/open/v1/common/symbols"
+        )
+
+        data = self._get(url)
+
+        if not isinstance(data, dict):
+            raise RuntimeError(
+                "Binance TR sembol cevabı beklenen formatta değil."
+            )
+
+        symbols = data.get("list", [])
+
+        if not isinstance(symbols, list):
+            raise RuntimeError(
+                "Binance TR sembol listesi bulunamadı."
+            )
+
+        result: list[dict[str, Any]] = []
+
+        for symbol in symbols:
+
+            if not isinstance(symbol, dict):
+                continue
+
+            symbol_name = str(
+                symbol.get("symbol", "")
+            ).upper()
+
+            quote_asset = str(
+                symbol.get("quoteAsset", "")
+            ).upper()
+
+            if not symbol_name:
+                continue
+
+            if quote_asset != "TRY":
+                continue
+
+            symbol_type_raw = symbol.get(
+                "type",
+                1,
+            )
+
+            try:
+                symbol_type = int(
+                    symbol_type_raw
+                )
+            except (
+                TypeError,
+                ValueError,
+            ):
+                symbol_type = 1
+
+            self.symbol_types[
+                symbol_name
+            ] = symbol_type
+
+            result.append(symbol)
+
+        print(
+            f"[BINANCE] TRY sembol sayısı: "
+            f"{len(result)}"
+        )
+
+        return result
+
+    # ========================================================
+    # SYMBOL TYPE
+    # ========================================================
+
+    def get_symbol_type(
+        self,
+        symbol: str,
+    ) -> int:
+
+        clean_symbol = (
+            symbol
+            .replace("_", "")
+            .upper()
+        )
+
+        if clean_symbol not in self.symbol_types:
+            self.get_symbols()
+
+        return self.symbol_types.get(
+            clean_symbol,
+            1,
+        )
+
+    # ========================================================
+    # KLINES
+    # ========================================================
+
+    def get_klines(
+        self,
+        symbol: str,
+        interval: str = "5m",
+        limit: int = 100,
+    ) -> list[list[Any]]:
+
+        clean_symbol = (
+            symbol
+            .replace("_", "")
+            .upper()
+        )
+
+        symbol_type = self.get_symbol_type(
+            symbol
+        )
+
+        if symbol_type == 2:
+
+            url = (
+                f"{BINANCE_TR_BASE_URL}"
+                "/open/v1/market/klines"
+            )
+
+        elif symbol_type == 3:
+
+            url = (
+                "https://cloudme-tr.2meta.app"
+                "/api/v1/klines"
+            )
+
+        else:
+
+            url = (
+                "https://api.binance.me"
+                "/api/v1/klines"
+            )
+
+        params = {
+            "symbol": clean_symbol,
+            "interval": interval,
+            "limit": min(
+                max(
+                    int(limit),
+                    1,
+                ),
+                1000,
+            ),
+        }
+
+        print(
+            f"[BINANCE] KLINES "
+            f"{clean_symbol} "
+            f"type={symbol_type}"
+        )
+
+        data = self._get(
+            url,
+            params,
+        )
+
+        if not isinstance(data, list):
+            raise RuntimeError(
+                f"{symbol} için geçersiz "
+                "mum verisi alındı."
+            )
+
+        return data
+
+    # ========================================================
+    # 24H TICKER
+    # ========================================================
+
+    def get_ticker_24h(
+        self,
+        symbol: str,
+    ) -> dict[str, Any]:
+
+        clean_symbol = (
+            symbol
+            .replace("_", "")
+            .upper()
+        )
+
+        symbol_type = self.get_symbol_type(
+            symbol
+        )
+
+        if symbol_type == 1:
+
+            url = (
+                "https://api.binance.me"
+                "/api/v3/ticker/24hr"
+            )
+
+        elif symbol_type == 3:
+
+            url = (
+                "https://cloudme-tr.2meta.app"
+                "/api/v1/ticker/24hr"
+            )
+
+        else:
+
+            url = (
+                f"{BINANCE_TR_BASE_URL}"
+                "/open/v1/market/ticker/24hr"
+            )
+
+        data = self._get(
+            url,
+            {
+                "symbol": clean_symbol,
+            },
+        )
+
+        if not isinstance(data, dict):
+            raise RuntimeError(
+                f"{symbol} için geçersiz "
+                "ticker verisi alındı."
+            )
+
+        return data
+
+    # ========================================================
+    # CLOSE
+    # ========================================================
+
+    def close(self) -> None:
+
+        try:
+            self.session.close()
+        except Exception:
+            pass

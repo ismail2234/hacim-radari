@@ -13,7 +13,7 @@ import os
 
 BINANCE_TR_BASE_URL = os.getenv(
     "BINANCE_TR_BASE_URL",
-    "https://api.binance.tr",
+    "https://www.binance.tr"
 ).rstrip("/")
 
 

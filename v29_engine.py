@@ -1543,3 +1543,807 @@ class V29Engine:
             min(score, 30),
             reasons,
     )
+    # ========================================================
+    # V29 FİNAL SKOR
+    # ========================================================
+
+    def _calculate_final_score(
+        self,
+        trend_score: int,
+        momentum_score: int,
+        volume_score: int,
+        acceleration_score: int,
+        curvature_score: int,
+        early_score: int,
+        v28_score: int,
+        market_activity_score: int,
+    ) -> int:
+
+        """
+        V29 ağırlıklı skor sistemi.
+
+        Erken dönüş hedefi nedeniyle:
+
+            KIVRIM
+            MOMENTUM
+            HACİM
+            AKTİVİTE
+
+        klasik trendden daha fazla önem taşır.
+        """
+
+        # Her bölümün kendi maksimum puanını
+        # 0-100 aralığına çeviriyoruz.
+
+        trend_norm = (
+            trend_score / 30
+        ) * 100
+
+        momentum_norm = (
+            momentum_score / 30
+        ) * 100
+
+        volume_norm = (
+            volume_score / 25
+        ) * 100
+
+        acceleration_norm = (
+            acceleration_score / 20
+        ) * 100
+
+        # ----------------------------------------------------
+        # Ağırlıklı skor
+        # ----------------------------------------------------
+
+        weighted = (
+            trend_norm * 0.12
+            + momentum_norm * 0.20
+            + volume_norm * 0.15
+            + acceleration_norm * 0.10
+            + curvature_score * 0.18
+            + early_score * 0.10
+            + v28_score * 0.05
+            + market_activity_score * 0.10
+        )
+
+        return int(
+            round(
+                _clamp(
+                    weighted,
+                    0,
+                    100,
+                )
+            )
+        )
+
+
+    # ========================================================
+    # KALİTE
+    # ========================================================
+
+    def _quality(
+        self,
+        score: int,
+        curvature_type: str,
+        early_score: int,
+        volume_ratio: float,
+    ) -> str:
+
+        # ----------------------------------------------------
+        # Çok güçlü
+        # ----------------------------------------------------
+
+        if (
+            score >= STRONG_SCORE
+            and curvature_type
+            == "KIVRIM ÖNCÜ"
+            and early_score >= 45
+            and volume_ratio >= 1.15
+        ):
+
+            return "ÇOK GÜÇLÜ"
+
+        # ----------------------------------------------------
+        # Güçlü
+        # ----------------------------------------------------
+
+        if (
+            score >= 70
+            and curvature_type
+            in (
+                "KIVRIM ÖNCÜ",
+                "KIVRIM GELİŞİYOR",
+            )
+        ):
+
+            return "GÜÇLÜ"
+
+        # ----------------------------------------------------
+        # İyi
+        # ----------------------------------------------------
+
+        if score >= EARLY_SCORE:
+
+            return "İYİ"
+
+        # ----------------------------------------------------
+        # Aday
+        # ----------------------------------------------------
+
+        if score >= MIN_SCORE:
+
+            return "ADAY"
+
+        return "ZAYIF"
+
+
+    # ========================================================
+    # SİNYAL KARARI
+    # ========================================================
+
+    def _decide_signal(
+        self,
+        score: int,
+        curvature_type: str,
+        early_score: int,
+        rsi: float,
+        volume_ratio: float,
+        volume_acceleration: float,
+        v28_signal: str,
+        v28_score: int,
+    ) -> tuple[
+        str,
+        str,
+        bool,
+        str,
+    ]:
+
+        """
+        V29 son karar mekanizması.
+
+        Buradaki amaç:
+
+            Her yüksek skoru AL yapmamak.
+
+        Ama aynı zamanda:
+
+            Gerçek erken KIVRIM'i
+            V28 teyidi gelmedi diye
+            kaçırmamak.
+
+        """
+
+        # ====================================================
+        # 1 — SKOR YETERSİZ
+        # ====================================================
+
+        if score < self.min_score:
+
+            return (
+                "BEKLE",
+                "YOK",
+                True,
+                "skor eşik altında",
+            )
+
+        # ====================================================
+        # 2 — KIVRIM YOK
+        # ====================================================
+
+        if curvature_type == "YOK":
+
+            return (
+                "BEKLE",
+                "YOK",
+                True,
+                "kıvrım oluşmadı",
+            )
+
+        # ====================================================
+        # 3 — AŞIRI RSI
+        # ====================================================
+
+        #
+        # RSI zaten 70 üzerine çıkmışsa,
+        # yeni hareketi kovalamak istemiyoruz.
+        #
+
+        if (
+            rsi >= RSI_HIGH
+            and early_score < 50
+        ):
+
+            return (
+                "BEKLE",
+                "YOK",
+                True,
+                "RSI aşırı yükselmiş",
+            )
+
+        # ====================================================
+        # 4 — HACİM KONTROLÜ
+        # ====================================================
+
+        #
+        # Hacim tamamen ölü ise
+        # KIVRIM sinyali vermiyoruz.
+        #
+
+        if volume_ratio < MIN_VOLUME_RATIO:
+
+            return (
+                "BEKLE",
+                "YOK",
+                True,
+                "hacim desteği yetersiz",
+            )
+
+        # ====================================================
+        # 5 — ÇOK GÜÇLÜ KIVRIM ÖNCÜ
+        # ====================================================
+
+        #
+        # Bu bölüm V29'un en önemli taraflarından biri.
+        #
+        # V28 henüz AL demese bile:
+        #
+        #   güçlü KIVRIM
+        #   + erkenlik
+        #   + hacim
+        #
+        # varsa erken AL verebilir.
+        #
+
+        if (
+            score >= STRONG_SCORE
+            and curvature_type
+            == "KIVRIM ÖNCÜ"
+            and early_score >= 45
+            and volume_ratio >= 1.10
+        ):
+
+            return (
+                "AL",
+                "1. TEYİT",
+                False,
+                "",
+            )
+
+        # ====================================================
+        # 6 — V28 + V29
+        # ====================================================
+
+        #
+        # İki motor aynı yöne bakıyorsa
+        # daha güçlü teyit.
+        #
+
+        if (
+            score >= EARLY_SCORE
+            and curvature_type
+            in (
+                "KIVRIM ÖNCÜ",
+                "KIVRIM GELİŞİYOR",
+            )
+            and (
+                "AL"
+                in v28_signal
+                or v28_score >= 60
+            )
+        ):
+
+            return (
+                "AL",
+                "2. TEYİT",
+                False,
+                "",
+            )
+
+        # ====================================================
+        # 7 — V29 BAĞIMSIZ ÖNCÜ
+        # ====================================================
+
+        #
+        # V28 henüz dönüşü yakalamamış olabilir.
+        #
+        # Ancak:
+        #
+        #   KIVRIM ÖNCÜ
+        #   yüksek erkenlik
+        #   hacim ivmesi
+        #
+        # varsa V29 kendi başına aday olabilir.
+        #
+
+        if (
+            score >= 72
+            and curvature_type
+            == "KIVRIM ÖNCÜ"
+            and early_score >= 50
+            and volume_acceleration >= 0.05
+        ):
+
+            return (
+                "AL",
+                "V29 ÖNCÜ",
+                False,
+                "",
+            )
+
+        # ====================================================
+        # 8 — GELİŞEN KIVRIM
+        # ====================================================
+
+        #
+        # Henüz AL değil.
+        #
+        # Ama takip edilmeye değer.
+        #
+
+        if (
+            score >= self.min_score
+            and curvature_type
+            == "KIVRIM GELİŞİYOR"
+        ):
+
+            return (
+                "BEKLE",
+                "İZLE",
+                False,
+                "",
+            )
+
+        # ====================================================
+        # 9 — GENEL BEKLE
+        # ====================================================
+
+        return (
+            "BEKLE",
+            "İZLE",
+            True,
+            "yeterli teyit yok",
+        )
+
+
+    # ========================================================
+    # COOLDOWN KONTROLÜ
+    # ========================================================
+
+    def _cooldown_check(
+        self,
+        symbol: str,
+    ) -> bool:
+
+        """
+        Aynı coin için kısa aralıklarla
+        tekrar tekrar AL gönderilmesini engeller.
+        """
+
+        now = time.time()
+
+        previous = self._last_signals.get(
+            symbol
+        )
+
+        # İlk sinyal.
+        if previous is None:
+
+            return True
+
+        # Süre dolduysa yeni sinyale izin ver.
+        return (
+            now - previous
+            >= self.signal_cooldown
+        )
+
+
+    def _mark_signal(
+        self,
+        symbol: str,
+    ) -> None:
+
+        self._last_signals[
+            symbol
+        ] = time.time()
+
+
+    # ========================================================
+    # ANA V29 HESAPLAMA
+    # ========================================================
+
+    def calculate(
+        self,
+        symbol: str,
+        df: pd.DataFrame,
+    ) -> V29Result:
+
+        """
+        V29'un ana giriş noktası.
+
+        Veri
+          ↓
+        indikatörler
+          ↓
+        trend
+          ↓
+        momentum
+          ↓
+        hacim
+          ↓
+        KIVRIM
+          ↓
+        piyasa aktivitesi
+          ↓
+        V28 teyidi
+          ↓
+        final skor
+          ↓
+        AL / BEKLE
+        """
+
+        symbol = str(
+            symbol
+        ).upper().strip()
+
+        result = V29Result(
+            symbol=symbol
+        )
+
+        # ====================================================
+        # VERİ KONTROLÜ
+        # ====================================================
+
+        if (
+            df is None
+            or df.empty
+        ):
+
+            result.rejected = True
+
+            result.reject_reason = (
+                "veri yok"
+            )
+
+            return result
+
+        # En az 30 mum.
+        if len(df) < 30:
+
+            result.rejected = True
+
+            result.reject_reason = (
+                "yeterli mum verisi yok"
+            )
+
+            return result
+
+        # ====================================================
+        # DATAFRAME HAZIRLA
+        # ====================================================
+
+        work = self.prepare_dataframe(
+            df
+        )
+
+        if work.empty:
+
+            result.rejected = True
+
+            result.reject_reason = (
+                "dataframe hazırlanamadı"
+            )
+
+            return result
+
+        # ====================================================
+        # TEKNİK DEĞERLER
+        # ====================================================
+
+        values = self._extract_values(
+            work
+        )
+
+        result.price = values[
+            "price"
+        ]
+
+        result.price_change = values[
+            "price_change"
+        ]
+
+        result.rsi = values[
+            "rsi"
+        ]
+
+        result.macd = values[
+            "macd"
+        ]
+
+        result.macd_signal = values[
+            "macd_signal"
+        ]
+
+        result.macd_histogram = values[
+            "macd_histogram"
+        ]
+
+        result.ema_fast = values[
+            "ema_fast"
+        ]
+
+        result.ema_slow = values[
+            "ema_slow"
+        ]
+
+        result.volume_ratio = values[
+            "volume_ratio"
+        ]
+
+        result.volume_acceleration = values[
+            "volume_acceleration"
+        ]
+
+        # ====================================================
+        # TREND
+        # ====================================================
+
+        (
+            trend_score,
+            trend_reasons,
+        ) = self._trend_score(
+            work,
+            values,
+        )
+
+        result.trend_score = (
+            trend_score
+        )
+
+        # ====================================================
+        # MOMENTUM
+        # ====================================================
+
+        (
+            momentum_score,
+            momentum_reasons,
+        ) = self._momentum_score(
+            work,
+            values,
+        )
+
+        result.momentum_score = (
+            momentum_score
+        )
+
+        # ====================================================
+        # HACİM
+        # ====================================================
+
+        (
+            volume_score,
+            volume_reasons,
+        ) = self._volume_score(
+            values
+        )
+
+        result.volume_score = (
+            volume_score
+        )
+
+        # ====================================================
+        # HACİM İVMESİ
+        # ====================================================
+
+        acceleration_score = 0
+
+        if (
+            values[
+                "volume_acceleration"
+            ]
+            >= 0.05
+        ):
+
+            acceleration_score += 10
+
+        if (
+            values[
+                "volume_acceleration"
+            ]
+            >= 0.15
+        ):
+
+            acceleration_score += 10
+
+        result.acceleration_score = min(
+            acceleration_score,
+            20,
+        )
+
+        # ====================================================
+        # KIVRIM
+        # ====================================================
+
+        (
+            curvature_score,
+            curvature_type,
+            early_score,
+            curvature_reasons,
+        ) = self._curvature_score(
+            work,
+            values,
+        )
+
+        result.curvature_score = (
+            curvature_score
+        )
+
+        result.curvature_type = (
+            curvature_type
+        )
+
+        result.early_score = (
+            early_score
+        )
+
+        # ====================================================
+        # V28 TEYİDİ
+        # ====================================================
+
+        (
+            v28_signal,
+            v28_score,
+            v28_reasons,
+        ) = self._v28_confirmation(
+            work
+        )
+
+        # ====================================================
+        # PİYASA AKTİVİTESİ
+        # ====================================================
+
+        (
+            market_activity_score,
+            activity_reasons,
+        ) = self._market_activity_score(
+            values
+        )
+
+        # ====================================================
+        # FİNAL SKOR
+        # ====================================================
+
+        final_score = (
+            self._calculate_final_score(
+                trend_score=trend_score,
+                momentum_score=momentum_score,
+                volume_score=volume_score,
+                acceleration_score=acceleration_score,
+                curvature_score=curvature_score,
+                early_score=early_score,
+                v28_score=v28_score,
+                market_activity_score=market_activity_score,
+            )
+        )
+
+        result.score = int(
+            _clamp(
+                final_score,
+                0,
+                100,
+            )
+        )
+
+        # ====================================================
+        # KALİTE
+        # ====================================================
+
+        result.quality = (
+            self._quality(
+                score=result.score,
+                curvature_type=result.curvature_type,
+                early_score=result.early_score,
+                volume_ratio=result.volume_ratio,
+            )
+        )
+
+        # ====================================================
+        # NEDENLERİ TOPLA
+        # ====================================================
+
+        result.reasons = []
+
+        result.reasons.extend(
+            trend_reasons
+        )
+
+        result.reasons.extend(
+            momentum_reasons
+        )
+
+        result.reasons.extend(
+            volume_reasons
+        )
+
+        result.reasons.extend(
+            curvature_reasons
+        )
+
+        result.reasons.extend(
+            activity_reasons
+        )
+
+        result.reasons.extend(
+            v28_reasons
+        )
+
+        # Aynı açıklamaları temizle.
+        result.reasons = list(
+            dict.fromkeys(
+                result.reasons
+            )
+        )
+
+        # ====================================================
+        # KARAR
+        # ====================================================
+
+        (
+            signal,
+            confirmation,
+            rejected,
+            reject_reason,
+        ) = self._decide_signal(
+            score=result.score,
+            curvature_type=result.curvature_type,
+            early_score=result.early_score,
+            rsi=result.rsi,
+            volume_ratio=result.volume_ratio,
+            volume_acceleration=result.volume_acceleration,
+            v28_signal=v28_signal,
+            v28_score=v28_score,
+        )
+
+        result.signal = signal
+
+        result.confirmation = (
+            confirmation
+        )
+
+        result.rejected = rejected
+
+        result.reject_reason = (
+            reject_reason
+        )
+
+        # ====================================================
+        # COOLDOWN
+        # ====================================================
+
+        if result.signal == "AL":
+
+            if not self._cooldown_check(
+                symbol
+            ):
+
+                result.signal = (
+                    "BEKLE"
+                )
+
+                result.confirmation = (
+                    "COOLDOWN"
+                )
+
+                result.rejected = True
+
+                result.reject_reason = (
+                    "aynı coin için "
+                    "tekrar sinyal bekleme süresi"
+                )
+
+            else:
+
+                self._mark_signal(
+                    symbol
+                )
+
+        return result

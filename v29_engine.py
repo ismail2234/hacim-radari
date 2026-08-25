@@ -2347,3 +2347,231 @@ class V29Engine:
                 )
 
         return result
+    # ========================================================
+    # KOLAY KULLANIM
+    # ========================================================
+
+    def analyze(
+        self,
+        symbol: str,
+        df: pd.DataFrame,
+    ) -> Dict[str, Any]:
+
+        """
+        Diğer modüller için sade V29 API'si.
+        """
+
+        result = self.calculate(
+            symbol,
+            df,
+        )
+
+        return result.to_dict()
+
+
+# ============================================================
+# GLOBAL V29 ENGINE
+# ============================================================
+
+v29_engine = V29Engine()
+
+
+# ============================================================
+# DIŞARIDAN ÇAĞRILABİLECEK FONKSİYON
+# ============================================================
+
+def calculate_v29_signal(
+    symbol: str,
+    df: pd.DataFrame,
+) -> Dict[str, Any]:
+
+    """
+    V29 sinyal hesaplama.
+
+    Örnek:
+
+        result = calculate_v29_signal(
+            "PEOPLETRY",
+            df,
+        )
+    """
+
+    return v29_engine.analyze(
+        symbol,
+        df,
+    )
+
+
+# ============================================================
+# GERİYE DÖNÜK UYUMLULUK
+# ============================================================
+
+def calculate_signal(
+    symbol: str,
+    df: pd.DataFrame,
+) -> Dict[str, Any]:
+
+    """
+    Eski sistem calculate_signal()
+    kullanıyorsa V29'a yönlendirir.
+
+    Böylece diğer dosyalarda gereksiz
+    değişiklik yapma ihtiyacını azaltır.
+    """
+
+    return calculate_v29_signal(
+        symbol,
+        df,
+    )
+
+
+# ============================================================
+# DEBUG / TEST
+# ============================================================
+
+def debug_v29(
+    symbol: str,
+    df: pd.DataFrame,
+) -> None:
+
+    """
+    Telefonda / Railway loglarında
+    V29'un neden sinyal verdiğini görmek için.
+    """
+
+    result = calculate_v29_signal(
+        symbol,
+        df,
+    )
+
+    print()
+    print("=" * 64)
+    print(
+        f"🐋 BALİNA RADARI {V29_VERSION}"
+    )
+    print("=" * 64)
+
+    print(
+        f"🪙 Coin          : "
+        f"{result['symbol']}"
+    )
+
+    print(
+        f"💰 Fiyat         : "
+        f"{result['price']}"
+    )
+
+    print(
+        f"🎯 Skor          : "
+        f"{result['score']}/100"
+    )
+
+    print(
+        f"🌀 Kıvrım        : "
+        f"{result['curvature_type']}"
+    )
+
+    print(
+        f"🎯 Kıvrım Skoru  : "
+        f"{result['curvature_score']}/100"
+    )
+
+    print(
+        f"⚡ Erkenlik       : "
+        f"{result['early_score']}/100"
+    )
+
+    print(
+        f"📈 RSI            : "
+        f"{result['rsi']:.2f}"
+    )
+
+    print(
+        f"📊 Hacim Oranı    : "
+        f"{result['volume_ratio']:.2f}x"
+    )
+
+    print(
+        f"🚀 Hacim İvmesi   : "
+        f"{result['volume_acceleration'] * 100:.2f}%"
+    )
+
+    print(
+        f"🟢 Sinyal         : "
+        f"{result['signal']}"
+    )
+
+    print(
+        f"✅ Teyit          : "
+        f"{result['confirmation']}"
+    )
+
+    print(
+        f"⭐ Kalite         : "
+        f"{result['quality']}"
+    )
+
+    if result["rejected"]:
+
+        print(
+            f"⛔ Red Nedeni    : "
+            f"{result['reject_reason']}"
+        )
+
+    print()
+    print("📋 NEDENLER:")
+
+    reasons = result.get(
+        "reasons",
+        [],
+    )
+
+    if reasons:
+
+        for reason in reasons:
+
+            print(
+                f"  • {reason}"
+            )
+
+    else:
+
+        print(
+            "  • Henüz yeterli neden oluşmadı."
+        )
+
+    print("=" * 64)
+    print()
+
+
+# ============================================================
+# V29 DOSYA SONU
+# ============================================================
+#
+# ÖNEMLİ:
+#
+# Bu dosyanın görevi:
+#
+#       VERİ
+#        ↓
+#       TEKNİK ANALİZ
+#        ↓
+#       KIVRIM
+#        ↓
+#       HACİM
+#        ↓
+#       MOMENTUM
+#        ↓
+#       PİYASA AKTİVİTESİ
+#        ↓
+#       V28 TEYİDİ
+#        ↓
+#       V29 SKOR
+#        ↓
+#       AL / BEKLE
+#
+# Telegram gönderimi burada yapılmaz.
+#
+# Telegram işlemi scanner / bot tarafında kalır.
+#
+# ============================================================

@@ -775,3 +775,771 @@ class V29Engine:
             "volume_acceleration": volume_acceleration,
             "price_change": price_change,
         }
+    # ========================================================
+    # TREND ANALİZİ
+    # ========================================================
+
+    def _trend_score(
+        self,
+        df: pd.DataFrame,
+        values: Dict[str, float],
+    ) -> tuple[int, list[str]]:
+
+        score = 0
+        reasons: list[str] = []
+
+        price = values["price"]
+        ema_fast = values["ema_fast"]
+        ema_slow = values["ema_slow"]
+
+        previous_ema_fast = _prev(
+            df,
+            "ema_9",
+            ema_fast,
+        )
+
+        previous_ema_slow = _prev(
+            df,
+            "ema_20",
+            ema_slow,
+        )
+
+        # Fiyat kısa EMA üzerine dönüyor.
+        if price > ema_fast:
+
+            score += 10
+
+            reasons.append(
+                "fiyat kısa EMA üzerinde"
+            )
+
+        # Kısa EMA yukarı dönüyor.
+        if ema_fast > previous_ema_fast:
+
+            score += 8
+
+            reasons.append(
+                "kısa EMA yukarı dönüyor"
+            )
+
+        # Fiyat orta EMA üzerinde.
+        if price > ema_slow:
+
+            score += 5
+
+            reasons.append(
+                "fiyat orta EMA üzerinde"
+            )
+
+        # EMA yapısı pozitif.
+        if ema_fast > ema_slow:
+
+            score += 7
+
+            reasons.append(
+                "EMA yapısı pozitif"
+            )
+
+        # Henüz tam trend oluşmamış olabilir.
+        # Erken KIVRIM için sıkışma bölgesine
+        # küçük puan veriyoruz.
+        elif ema_fast > previous_ema_slow:
+
+            score += 4
+
+            reasons.append(
+                "EMA sıkışması / erken dönüş"
+            )
+
+        return (
+            min(score, 30),
+            reasons,
+        )
+
+
+    # ========================================================
+    # MOMENTUM ANALİZİ
+    # ========================================================
+
+    def _momentum_score(
+        self,
+        df: pd.DataFrame,
+        values: Dict[str, float],
+    ) -> tuple[int, list[str]]:
+
+        score = 0
+        reasons: list[str] = []
+
+        rsi = values["rsi"]
+
+        previous_rsi = _prev(
+            df,
+            "rsi",
+            rsi,
+        )
+
+        macd = values["macd"]
+
+        macd_signal = values[
+            "macd_signal"
+        ]
+
+        histogram = values[
+            "macd_histogram"
+        ]
+
+        previous_histogram = _prev(
+            df,
+            "macd_histogram",
+            histogram,
+        )
+
+        # ----------------------------------------------------
+        # RSI
+        # ----------------------------------------------------
+
+        # RSI yükseliyorsa dipten dönüş açısından
+        # önemli bir erken işarettir.
+        if rsi > previous_rsi:
+
+            score += 8
+
+            reasons.append(
+                "RSI toparlanıyor"
+            )
+
+        # Aşırı satımdan dönüş.
+        if (
+            RSI_OVERSOLD
+            <= rsi
+            <= RSI_RECOVERY
+        ):
+
+            score += 8
+
+            reasons.append(
+                "RSI dipten dönüş bölgesinde"
+            )
+
+        elif (
+            RSI_RECOVERY
+            < rsi
+            < RSI_MOMENTUM
+        ):
+
+            score += 6
+
+            reasons.append(
+                "RSI momentum bölgesine yaklaşıyor"
+            )
+
+        elif (
+            RSI_MOMENTUM
+            <= rsi
+            < RSI_HIGH
+        ):
+
+            score += 3
+
+            reasons.append(
+                "RSI pozitif momentumda"
+            )
+
+        # ----------------------------------------------------
+        # MACD
+        # ----------------------------------------------------
+
+        # Histogram önceki mumdan daha iyi.
+        if histogram > previous_histogram:
+
+            score += 8
+
+            reasons.append(
+                "MACD histogram iyileşiyor"
+            )
+
+        # MACD sinyal çizgisini geçti.
+        if macd > macd_signal:
+
+            score += 7
+
+            reasons.append(
+                "MACD pozitif"
+            )
+
+        # Henüz kesişmemiş fakat histogram toparlanıyor.
+        # Bu bölüm V29'un erkenlik tarafı.
+        elif (
+            macd <= macd_signal
+            and histogram > previous_histogram
+        ):
+
+            score += 6
+
+            reasons.append(
+                "MACD kesişim öncesi toparlanıyor"
+            )
+
+        return (
+            min(score, 30),
+            reasons,
+        )
+
+
+    # ========================================================
+    # HACİM ANALİZİ
+    # ========================================================
+
+    def _volume_score(
+        self,
+        values: Dict[str, float],
+    ) -> tuple[int, list[str]]:
+
+        score = 0
+        reasons: list[str] = []
+
+        ratio = values[
+            "volume_ratio"
+        ]
+
+        acceleration = values[
+            "volume_acceleration"
+        ]
+
+        # ----------------------------------------------------
+        # Hacim normalden yüksek.
+        # ----------------------------------------------------
+
+        if ratio >= 1.10:
+
+            score += 8
+
+            reasons.append(
+                "hacim normalin üzerinde"
+            )
+
+        # Belirgin hacim artışı.
+        if ratio >= 1.25:
+
+            score += 5
+
+            reasons.append(
+                "hacim belirgin şekilde artmış"
+            )
+
+        # Güçlü hacim aktivitesi.
+        if ratio >= 1.50:
+
+            score += 5
+
+            reasons.append(
+                "yüksek hacim aktivitesi"
+            )
+
+        # ----------------------------------------------------
+        # Hacim ivmesi.
+        # ----------------------------------------------------
+
+        if acceleration >= 0.05:
+
+            score += 5
+
+            reasons.append(
+                "hacim ivmesi pozitif"
+            )
+
+        if acceleration >= 0.15:
+
+            score += 4
+
+            reasons.append(
+                "hacim ivmesi güçlü"
+            )
+
+        return (
+            min(score, 25),
+            reasons,
+        )
+
+
+    # ========================================================
+    # KIVRIM ANALİZİ
+    # ========================================================
+
+    def _curvature_score(
+        self,
+        df: pd.DataFrame,
+        values: Dict[str, float],
+    ) -> tuple[
+        int,
+        str,
+        int,
+        list[str],
+    ]:
+
+        """
+        V29 KIVRIM motoru.
+
+        Buradaki temel fikir:
+
+        Fiyat henüz çok yükselmemiş olabilir.
+
+        Fakat aynı anda:
+
+            RSI ↑
+            MACD histogram ↑
+            Hacim ↑
+            Hacim ivmesi ↑
+            Fiyat dipten toparlanıyor
+
+        ise hareketin başlangıç bölgesinde
+        olma ihtimalini artırır.
+
+        """
+
+        score = 0
+        early = 0
+
+        reasons: list[str] = []
+
+        price = values["price"]
+
+        rsi = values["rsi"]
+
+        previous_close = _prev(
+            df,
+            "close",
+            price,
+        )
+
+        previous_rsi = _prev(
+            df,
+            "rsi",
+            rsi,
+        )
+
+        previous_rsi_2 = _prev2(
+            df,
+            "rsi",
+            previous_rsi,
+        )
+
+        histogram = values[
+            "macd_histogram"
+        ]
+
+        previous_histogram = _prev(
+            df,
+            "macd_histogram",
+            histogram,
+        )
+
+        previous_histogram_2 = _prev2(
+            df,
+            "macd_histogram",
+            previous_histogram,
+        )
+
+        volume_ratio = values[
+            "volume_ratio"
+        ]
+
+        volume_acceleration = values[
+            "volume_acceleration"
+        ]
+
+        price_change = values[
+            "price_change"
+        ]
+
+        # ====================================================
+        # 1 — FİYAT HENÜZ KAÇMAMIŞ MI?
+        # ====================================================
+
+        # Burada amaç zaten yükselmiş coini kovalamamak.
+        #
+        # Son mumdaki hareket:
+        #   - küçük / kontrollü ise erkenlik puanı
+        #   - aşırı ise puan verilmez.
+
+        if (
+            -4.5
+            <= price_change
+            <= 4.5
+        ):
+
+            early += 10
+
+        # ====================================================
+        # 2 — RSI YÖN DEĞİŞİMİ
+        # ====================================================
+
+        rsi_turn = (
+            rsi > previous_rsi
+        )
+
+        if rsi_turn:
+
+            score += 15
+            early += 10
+
+            reasons.append(
+                "RSI yön değiştirdi"
+            )
+
+        # İki mum üst üste toparlanıyorsa
+        # daha değerli erken sinyal.
+        if (
+            rsi > previous_rsi
+            and previous_rsi
+            > previous_rsi_2
+        ):
+
+            score += 5
+            early += 5
+
+            reasons.append(
+                "RSI iki mumdur toparlanıyor"
+            )
+
+        # ====================================================
+        # 3 — MACD HISTOGRAM DÖNÜŞÜ
+        # ====================================================
+
+        macd_turn = (
+            histogram
+            > previous_histogram
+        )
+
+        if macd_turn:
+
+            score += 15
+            early += 10
+
+            reasons.append(
+                "MACD histogram yön değiştirdi"
+            )
+
+        # İki mum üst üste iyileşme.
+        if (
+            histogram
+            > previous_histogram
+            and previous_histogram
+            > previous_histogram_2
+        ):
+
+            score += 5
+            early += 5
+
+            reasons.append(
+                "MACD histogram iki mumdur iyileşiyor"
+            )
+
+        # ====================================================
+        # 4 — HACİM DEĞİŞİMİ
+        # ====================================================
+
+        if volume_ratio >= 1.10:
+
+            score += 10
+            early += 5
+
+            reasons.append(
+                "hacim kıvrımı destekliyor"
+            )
+
+        if volume_acceleration >= 0.05:
+
+            score += 10
+            early += 5
+
+            reasons.append(
+                "hacim ivmesi kıvrımı destekliyor"
+            )
+
+        # ====================================================
+        # 5 — FİYAT TOPARLANIYOR MU?
+        # ====================================================
+
+        if price > previous_close:
+
+            score += 10
+
+            reasons.append(
+                "fiyat toparlanıyor"
+            )
+
+        # ====================================================
+        # 6 — ERKENLİK BONUSU
+        # ====================================================
+
+        #
+        # RSI + MACD + hacim aynı anda dönüyorsa
+        # bu bizim için çok önemli.
+        #
+
+        if (
+            rsi > previous_rsi
+            and histogram > previous_histogram
+            and volume_ratio >= 1.05
+        ):
+
+            score += 10
+            early += 10
+
+            reasons.append(
+                "RSI + MACD + hacim aynı anda dönüyor"
+            )
+
+        # ====================================================
+        # KIVRIM TİPİ
+        # ====================================================
+
+        if (
+            score >= 60
+            and early >= 35
+        ):
+
+            curvature_type = (
+                "KIVRIM ÖNCÜ"
+            )
+
+        elif (
+            score >= 40
+            and early >= 20
+        ):
+
+            curvature_type = (
+                "KIVRIM GELİŞİYOR"
+            )
+
+        elif score >= 25:
+
+            curvature_type = (
+                "KIVRIM ADAYI"
+            )
+
+        else:
+
+            curvature_type = "YOK"
+
+        return (
+            min(score, 100),
+            curvature_type,
+            min(early, 100),
+            reasons,
+        )
+
+
+    # ========================================================
+    # V28 TEYİDİ
+    # ========================================================
+
+    def _v28_confirmation(
+        self,
+        df: pd.DataFrame,
+    ) -> tuple[
+        str,
+        int,
+        list[str],
+    ]:
+
+        """
+        V28 motorunu yardımcı teyit olarak kullanır.
+
+        V29, V28'i tamamen silmez.
+
+        Güçlü V28 sinyali varsa V29 bunu
+        ek teyit olarak kullanabilir.
+        """
+
+        try:
+
+            result = calculate_v28_signal(
+                df
+            )
+
+        except Exception:
+
+            return (
+                "YOK",
+                0,
+                [],
+            )
+
+        if result is None:
+
+            return (
+                "YOK",
+                0,
+                [],
+            )
+
+        # ----------------------------------------------------
+        # Dictionary sonuç.
+        # ----------------------------------------------------
+
+        if isinstance(
+            result,
+            dict,
+        ):
+
+            signal = str(
+                result.get("signal")
+                or result.get("action")
+                or result.get("side")
+                or "YOK"
+            ).upper()
+
+            score = _i(
+                result.get("score"),
+                0,
+            )
+
+            reasons: list[str] = []
+
+            reason = result.get(
+                "reason"
+            )
+
+            if reason:
+
+                reasons.append(
+                    str(reason)
+                )
+
+            return (
+                signal,
+                min(score, 100),
+                reasons,
+            )
+
+        # ----------------------------------------------------
+        # String sonuç.
+        # ----------------------------------------------------
+
+        if isinstance(
+            result,
+            str,
+        ):
+
+            signal = result.upper()
+
+            if "AL" in signal:
+
+                return (
+                    "AL",
+                    65,
+                    ["V28 AL teyidi"],
+                )
+
+            return (
+                signal,
+                0,
+                [],
+            )
+
+        return (
+            "YOK",
+            0,
+            [],
+        )
+
+
+    # ========================================================
+    # HUBAI BENZERİ PİYASA AKTİVİTESİ
+    # ========================================================
+
+    def _market_activity_score(
+        self,
+        values: Dict[str, float],
+    ) -> tuple[
+        int,
+        list[str],
+    ]:
+
+        """
+        HubAI Trader yaklaşımından ilhamlanan
+        piyasa aktivitesi katmanı.
+
+        Burada dışarıdan sahte veri kullanılmaz.
+
+        Elimizdeki gerçek Binance verilerinden:
+
+            • hacim
+            • hacim oranı
+            • hacim ivmesi
+            • fiyat hareketi
+
+        değerlendirilir.
+        """
+
+        score = 0
+
+        reasons: list[str] = []
+
+        ratio = values[
+            "volume_ratio"
+        ]
+
+        acceleration = values[
+            "volume_acceleration"
+        ]
+
+        price_change = values[
+            "price_change"
+        ]
+
+        # Aktivite artıyor.
+        if ratio >= 1.10:
+
+            score += 10
+
+            reasons.append(
+                "piyasa aktivitesi artıyor"
+            )
+
+        # Belirgin aktivite.
+        if ratio >= 1.30:
+
+            score += 5
+
+            reasons.append(
+                "işlem aktivitesi belirgin"
+            )
+
+        # Aktivite ivmeleniyor.
+        if acceleration >= 0.05:
+
+            score += 10
+
+            reasons.append(
+                "aktivite ivmeleniyor"
+            )
+
+        # Çok güçlü ivme.
+        if acceleration >= 0.15:
+
+            score += 5
+
+            reasons.append(
+                "aktivite güçlü ivmeleniyor"
+            )
+
+        # Fiyat henüz kaçmadan aktivite geliyor.
+        if (
+            0.0
+            <= price_change
+            <= 3.0
+        ):
+
+            score += 5
+
+            reasons.append(
+                "aktivite fiyat hareketinden önce geliyor"
+            )
+
+        return (
+            min(score, 30),
+            reasons,
+    )

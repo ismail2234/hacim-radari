@@ -78,8 +78,9 @@ class MarketScanner:
         )
 
         signal = calculate_v29_signal(
-            df
-        )
+    symbol,
+    df
+)
 
         result = {
             "symbol": symbol,

@@ -785,3 +785,866 @@ class V29Engine:
             return "AL"
 
         return "YOK"
+    # ========================================================
+    # TEKNİK FİLTRE
+    # ========================================================
+
+    def _technical_filter(
+        self,
+        df: pd.DataFrame,
+        values: Dict[str, float],
+    ) -> tuple[bool, list[str]]:
+
+        """
+        Teknik göstergeler burada ana sinyal değildir.
+
+        Sadece hacim sinyalinin çok zayıf / tehlikeli
+        durumda olup olmadığını kontrol eder.
+        """
+
+        reasons: list[str] = []
+
+        rsi = values["rsi"]
+
+        macd = values["macd"]
+
+        macd_signal = values[
+            "macd_signal"
+        ]
+
+        histogram = values[
+            "macd_histogram"
+        ]
+
+        previous_histogram = _prev(
+            df,
+            "macd_histogram",
+            histogram,
+        )
+
+        ema_fast = values[
+            "ema_fast"
+        ]
+
+        ema_slow = values[
+            "ema_slow"
+        ]
+
+        # ----------------------------------------------------
+        # RSI aşırı şişmişse yeni hareket kovalanmaz.
+        # ----------------------------------------------------
+
+        if rsi >= RSI_HIGH:
+
+            reasons.append(
+                "RSI yüksek — fiyat kovalanmıyor"
+            )
+
+            return False, reasons
+
+        # ----------------------------------------------------
+        # MACD histogram düşüyorsa dikkat.
+        # ----------------------------------------------------
+
+        if histogram < previous_histogram:
+
+            reasons.append(
+                "MACD histogram zayıflıyor"
+            )
+
+        else:
+
+            reasons.append(
+                "MACD histogram destekliyor"
+            )
+
+        # ----------------------------------------------------
+        # EMA yönü
+        # ----------------------------------------------------
+
+        if ema_fast >= ema_slow:
+
+            reasons.append(
+                "EMA yapısı olumlu"
+            )
+
+        else:
+
+            # EMA henüz negatif olsa bile
+            # hacim sinyalini tamamen öldürmüyoruz.
+            reasons.append(
+                "EMA henüz tam dönmedi"
+            )
+
+        # ----------------------------------------------------
+        # MACD
+        # ----------------------------------------------------
+
+        if macd > macd_signal:
+
+            reasons.append(
+                "MACD pozitif"
+            )
+
+        elif histogram > previous_histogram:
+
+            reasons.append(
+                "MACD erken toparlanıyor"
+            )
+
+        else:
+
+            reasons.append(
+                "MACD henüz teyit vermiyor"
+            )
+
+        return True, reasons
+
+
+    # ========================================================
+    # SKOR
+    # ========================================================
+
+    def _calculate_score(
+        self,
+        metrics: Dict[str, Any],
+        values: Dict[str, float],
+    ) -> int:
+
+        """
+        Skor artık sinyalin patronu değildir.
+
+        Sadece analiz/debug amacıyla tutulur.
+
+        HACİM en yüksek ağırlığa sahiptir.
+        """
+
+        ratio = _f(
+            metrics.get(
+                "volume_ratio"
+            )
+        )
+
+        acceleration = _f(
+            metrics.get(
+                "volume_acceleration"
+            )
+        )
+
+        price_change = _f(
+            values.get(
+                "price_change"
+            )
+        )
+
+        bullish = bool(
+            metrics.get(
+                "bullish_candle",
+                False,
+            )
+        )
+
+        building = bool(
+            metrics.get(
+                "volume_building",
+                False,
+            )
+        )
+
+        score = 0
+
+        # ----------------------------------------------------
+        # HACİM
+        # ----------------------------------------------------
+
+        if ratio >= 1.05:
+            score += 25
+
+        if ratio >= 1.25:
+            score += 15
+
+        if ratio >= 1.50:
+            score += 15
+
+        if ratio >= 2.00:
+            score += 20
+
+        if ratio >= 3.00:
+            score += 10
+
+        # ----------------------------------------------------
+        # HACİM İVMESİ
+        # ----------------------------------------------------
+
+        if acceleration >= 0.05:
+            score += 10
+
+        if acceleration >= 0.15:
+            score += 10
+
+        # ----------------------------------------------------
+        # HACİM HAZIRLANIYOR
+        # ----------------------------------------------------
+
+        if building:
+            score += 10
+
+        # ----------------------------------------------------
+        # FİYAT
+        # ----------------------------------------------------
+
+        if bullish:
+            score += 5
+
+        if 0 < price_change <= 3.5:
+            score += 5
+
+        return int(
+            _clamp(
+                score,
+                0,
+                100,
+            )
+        )
+
+
+    # ========================================================
+    # KALİTE
+    # ========================================================
+
+    def _quality(
+        self,
+        signal: str,
+    ) -> str:
+
+        if signal == "ÇOK GÜÇLÜ AL":
+
+            return "ÇOK GÜÇLÜ"
+
+        if signal == "AL":
+
+            return "GÜÇLÜ"
+
+        return "ZAYIF"
+
+
+    # ========================================================
+    # COOLDOWN
+    # ========================================================
+
+    def _cooldown_check(
+        self,
+        symbol: str,
+    ) -> bool:
+
+        now = time.time()
+
+        previous = (
+            self._last_signals.get(
+                symbol
+            )
+        )
+
+        if previous is None:
+
+            return True
+
+        return (
+            now - previous
+            >= self.signal_cooldown
+        )
+
+
+    def _mark_signal(
+        self,
+        symbol: str,
+    ) -> None:
+
+        self._last_signals[
+            symbol
+        ] = time.time()
+
+
+    # ========================================================
+    # ANA HESAPLAMA
+    # ========================================================
+
+    def calculate(
+        self,
+        symbol: str,
+        df: pd.DataFrame,
+    ) -> V29Result:
+
+        symbol = str(
+            symbol
+        ).upper().strip()
+
+        result = V29Result(
+            symbol=symbol
+        )
+
+        # ----------------------------------------------------
+        # VERİ KONTROLÜ
+        # ----------------------------------------------------
+
+        if (
+            df is None
+            or df.empty
+        ):
+
+            result.rejected = True
+
+            result.reject_reason = (
+                "veri yok"
+            )
+
+            return result
+
+        if len(df) < 20:
+
+            result.rejected = True
+
+            result.reject_reason = (
+                "yeterli mum verisi yok"
+            )
+
+            return result
+
+        # ----------------------------------------------------
+        # DATAFRAME
+        # ----------------------------------------------------
+
+        work = self.prepare_dataframe(
+            df
+        )
+
+        if work.empty:
+
+            result.rejected = True
+
+            result.reject_reason = (
+                "dataframe hazırlanamadı"
+            )
+
+            return result
+
+        # ----------------------------------------------------
+        # TEKNİK DEĞERLER
+        # ----------------------------------------------------
+
+        values = (
+            self._extract_values(
+                work
+            )
+        )
+
+        result.price = values[
+            "price"
+        ]
+
+        result.price_change = values[
+            "price_change"
+        ]
+
+        result.rsi = values[
+            "rsi"
+        ]
+
+        result.macd = values[
+            "macd"
+        ]
+
+        result.macd_signal = values[
+            "macd_signal"
+        ]
+
+        result.macd_histogram = values[
+            "macd_histogram"
+        ]
+
+        result.ema_fast = values[
+            "ema_fast"
+        ]
+
+        result.ema_slow = values[
+            "ema_slow"
+        ]
+
+        # ----------------------------------------------------
+        # YENİ TL HACİM MOTORU
+        # ----------------------------------------------------
+
+        metrics = (
+            self._volume_analysis(
+                work
+            )
+        )
+
+        result.volume_try = _f(
+            metrics.get(
+                "volume_try"
+            )
+        )
+
+        result.average_volume_try = _f(
+            metrics.get(
+                "average_volume_try"
+            )
+        )
+
+        result.volume_ratio = _f(
+            metrics.get(
+                "volume_ratio"
+            )
+        )
+
+        result.volume_change_pct = _f(
+            metrics.get(
+                "volume_change_pct"
+            )
+        )
+
+        result.volume_acceleration = _f(
+            metrics.get(
+                "volume_acceleration"
+            )
+        )
+
+        result.volume_building = bool(
+            metrics.get(
+                "volume_building",
+                False,
+            )
+        )
+
+        result.volume_spike = bool(
+            metrics.get(
+                "volume_spike",
+                False,
+            )
+        )
+
+        # ====================================================
+        # HACİM SİNYALİ
+        # ====================================================
+
+        volume_signal = (
+            self._volume_signal(
+                metrics,
+                values,
+            )
+        )
+
+        # ====================================================
+        # TEKNİK FİLTRE
+        # ====================================================
+
+        technical_ok, technical_reasons = (
+            self._technical_filter(
+                work,
+                values,
+            )
+        )
+
+        # ====================================================
+        # SKOR
+        # ====================================================
+
+        result.score = (
+            self._calculate_score(
+                metrics,
+                values,
+            )
+        )
+
+        # ====================================================
+        # NEDENLER
+        # ====================================================
+
+        result.reasons = []
+
+        ratio = result.volume_ratio
+
+        acceleration = (
+            result.volume_acceleration
+        )
+
+        if result.volume_building:
+
+            result.reasons.append(
+                "hacim yükseliyor"
+            )
+
+        if ratio >= 1.10:
+
+            result.reasons.append(
+                "TL hacmi güçleniyor"
+            )
+
+        if ratio >= 1.50:
+
+            result.reasons.append(
+                "TL hacmi belirgin yükseldi"
+            )
+
+        if ratio >= 2.00:
+
+            result.reasons.append(
+                "TL hacim patlaması"
+            )
+
+        if ratio >= 3.00:
+
+            result.reasons.append(
+                "TL hacim çok güçlü patladı"
+            )
+
+        if acceleration >= 0.05:
+
+            result.reasons.append(
+                "hacim ivmesi pozitif"
+            )
+
+        if acceleration >= 0.15:
+
+            result.reasons.append(
+                "hacim ivmesi çok güçlü"
+            )
+
+        if values["price_change"] > 0:
+
+            result.reasons.append(
+                "fiyat yukarı tepki veriyor"
+            )
+
+        result.reasons.extend(
+            technical_reasons
+        )
+
+        result.reasons = list(
+            dict.fromkeys(
+                result.reasons
+            )
+        )
+
+        # ====================================================
+        # FİNAL KARAR
+        # ====================================================
+        #
+        # ÇOK ÖNEMLİ:
+        #
+        # Artık score >= X olduğu için AL
+        # mantığı kullanılmıyor.
+        #
+        # HACİM SİNYALİ kararın merkezinde.
+        #
+
+        signal = volume_signal
+
+        # ----------------------------------------------------
+        # Teknik filtre çok kötü ise AL iptal.
+        # ----------------------------------------------------
+
+        if (
+            signal == "AL"
+            and not technical_ok
+        ):
+
+            signal = "BEKLE"
+
+            result.rejected = True
+
+            result.reject_reason = (
+                "teknik filtre uygun değil"
+            )
+
+        elif (
+            signal == "ÇOK GÜÇLÜ AL"
+            and not technical_ok
+            and result.rsi >= RSI_HIGH
+        ):
+
+            signal = "BEKLE"
+
+            result.rejected = True
+
+            result.reject_reason = (
+                "RSI çok yüksek, hareket kovalanmıyor"
+            )
+
+        # ----------------------------------------------------
+        # Fiyat çok fazla kaçtıysa AL yok.
+        # ----------------------------------------------------
+
+        if (
+            signal in (
+                "AL",
+                "ÇOK GÜÇLÜ AL",
+            )
+            and result.price_change
+            > MAX_CHASE_PRICE_CHANGE
+        ):
+
+            signal = "BEKLE"
+
+            result.rejected = True
+
+            result.reject_reason = (
+                "fiyat hareketi fazla ilerledi"
+            )
+
+        # ----------------------------------------------------
+        # Son karar
+        # ----------------------------------------------------
+
+        result.signal = signal
+
+        result.quality = (
+            self._quality(
+                signal
+            )
+        )
+
+        if signal == "ÇOK GÜÇLÜ AL":
+
+            result.confirmation = (
+                "HACİM PATLAMASI"
+            )
+
+            result.rejected = False
+
+            result.reject_reason = ""
+
+        elif signal == "AL":
+
+            result.confirmation = (
+                "HACİM YÜKSELİYOR"
+            )
+
+            result.rejected = False
+
+            result.reject_reason = ""
+
+        else:
+
+            result.confirmation = "YOK"
+
+        # ====================================================
+        # COOLDOWN
+        # ====================================================
+
+        if result.signal in (
+            "AL",
+            "ÇOK GÜÇLÜ AL",
+        ):
+
+            if not self._cooldown_check(
+                symbol
+            ):
+
+                result.signal = (
+                    "BEKLE"
+                )
+
+                result.confirmation = (
+                    "COOLDOWN"
+                )
+
+                result.quality = (
+                    "ZAYIF"
+                )
+
+                result.rejected = True
+
+                result.reject_reason = (
+                    "aynı coin için "
+                    "tekrar sinyal bekleme süresi"
+                )
+
+            else:
+
+                self._mark_signal(
+                    symbol
+                )
+
+        return result
+
+
+    # ========================================================
+    # KOLAY KULLANIM
+    # ========================================================
+
+    def analyze(
+        self,
+        symbol: str,
+        df: pd.DataFrame,
+    ) -> Dict[str, Any]:
+
+        result = self.calculate(
+            symbol,
+            df,
+        )
+
+        return result.to_dict()
+
+
+# ============================================================
+# GLOBAL ENGINE
+# ============================================================
+
+v29_engine = V29Engine()
+
+
+# ============================================================
+# DIŞARIDAN ÇAĞRILABİLECEK FONKSİYON
+# ============================================================
+
+def calculate_v29_signal(
+    symbol: str,
+    df: pd.DataFrame,
+) -> Dict[str, Any]:
+
+    return v29_engine.analyze(
+        symbol,
+        df,
+    )
+
+
+# ============================================================
+# GERİYE DÖNÜK UYUMLULUK
+# ============================================================
+
+def calculate_signal(
+    symbol: str,
+    df: pd.DataFrame,
+) -> Dict[str, Any]:
+
+    return calculate_v29_signal(
+        symbol,
+        df,
+    )
+
+
+# ============================================================
+# DEBUG
+# ============================================================
+
+def debug_v29(
+    symbol: str,
+    df: pd.DataFrame,
+) -> None:
+
+    result = calculate_v29_signal(
+        symbol,
+        df,
+    )
+
+    print()
+    print("=" * 64)
+    print(
+        f"🐋 BALİNA RADARI {V29_VERSION}"
+    )
+    print("=" * 64)
+
+    print(
+        f"🪙 Coin          : "
+        f"{result['symbol']}"
+    )
+
+    print(
+        f"💰 Fiyat         : "
+        f"{result['price']}"
+    )
+
+    print(
+        f"🎯 Skor          : "
+        f"{result['score']}/100"
+    )
+
+    print(
+        f"📊 TL Hacim      : "
+        f"{result['volume_try']:,.2f}"
+    )
+
+    print(
+        f"📊 Hacim Oranı   : "
+        f"{result['volume_ratio']:.2f}x"
+    )
+
+    print(
+        f"🚀 Hacim İvmesi  : "
+        f"{result['volume_acceleration'] * 100:.2f}%"
+    )
+
+    print(
+        f"📈 RSI           : "
+        f"{result['rsi']:.2f}"
+    )
+
+    print(
+        f"🟢 Sinyal        : "
+        f"{result['signal']}"
+    )
+
+    print(
+        f"✅ Teyit         : "
+        f"{result['confirmation']}"
+    )
+
+    print(
+        f"⭐ Kalite        : "
+        f"{result['quality']}"
+    )
+
+    if result["rejected"]:
+
+        print(
+            f"⛔ Red Nedeni    : "
+            f"{result['reject_reason']}"
+        )
+
+    print()
+    print("📋 NEDENLER:")
+
+    reasons = result.get(
+        "reasons",
+        [],
+    )
+
+    if reasons:
+
+        for reason in reasons:
+
+            print(
+                f"  • {reason}"
+            )
+
+    else:
+
+        print(
+            "  • Henüz sinyal yok."
+        )
+
+    print("=" * 64)
+    print()
+
+
+# ============================================================
+# DOSYA SONU
+# ============================================================
+#
+# V29 YENİ MANTIK:
+#
+#       TL HACİM
+#          ↓
+#     HACİM HAZIRLIĞI
+#          ↓
+#      FİYAT FİLTRESİ
+#          ↓
+#     TEKNİK FİLTRE
+#          ↓
+#    AL / ÇOK GÜÇLÜ AL
+#
+# Telegram gönderimi bu dosyada yapılmaz.
+#
+# ============================================================

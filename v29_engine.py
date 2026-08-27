@@ -511,13 +511,13 @@ class V29Engine:
                     / (1 + rs)
                 )
             )
-
-            work["rsi"] = (
+work["rsi"] = (
     work["rsi"]
     .infer_objects(copy=False)
     .fillna(50.0)
     .clip(0, 100)
-            )
+)
+        
 
         # ====================================================
         # MACD

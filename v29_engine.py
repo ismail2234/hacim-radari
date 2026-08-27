@@ -705,3 +705,488 @@ class V29Engine:
             }
 
         return metrics
+    def _volume_score(
+        self,
+        volume: Dict[str, Any],
+    ) -> tuple[int, list[str]]:
+
+        score = 0
+        reasons: list[str] = []
+
+        ratio = _f(
+            volume.get("volume_ratio"),
+            0.0,
+        )
+
+        acceleration = _f(
+            volume.get("volume_acceleration"),
+            0.0,
+        )
+
+        building = bool(
+            volume.get("volume_building")
+        )
+
+        spike = bool(
+            volume.get("volume_spike")
+        )
+
+        trend_up = bool(
+            volume.get("volume_trend_up")
+        )
+
+        early_setup = bool(
+            volume.get("early_volume_setup")
+        )
+
+        if ratio >= MIN_VOLUME_RATIO:
+            score += 15
+            reasons.append(
+                "hacim normalin üzerine çıktı"
+            )
+
+        if ratio >= AL_VOLUME_RATIO:
+            score += 10
+            reasons.append(
+                "hacim yükseliyor"
+            )
+
+        if ratio >= 1.50:
+            score += 15
+            reasons.append(
+                "hacim belirgin güçleniyor"
+            )
+
+        if ratio >= STRONG_VOLUME_RATIO:
+            score += 20
+            reasons.append(
+                "hacim güçlü yükseliyor"
+            )
+
+        if ratio >= SPIKE_VOLUME_RATIO:
+            score += 20
+            reasons.append(
+                "hacim patlaması"
+            )
+
+        if acceleration >= 0.05:
+            score += 10
+            reasons.append(
+                "hacim ivmesi pozitif"
+            )
+
+        if acceleration >= 0.15:
+            score += 10
+            reasons.append(
+                "hacim ivmesi çok güçlü"
+            )
+
+        if building:
+            score += 10
+            reasons.append(
+                "hacim kademeli yükseliyor"
+            )
+
+        if trend_up:
+            score += 5
+            reasons.append(
+                "hacim trendi yukarı"
+            )
+
+        if early_setup:
+            score += 10
+            reasons.append(
+                "erken hacim oluşumu"
+            )
+
+        if spike:
+            score += 10
+            reasons.append(
+                "hacim spike teyidi"
+            )
+
+        return (
+            min(score, 100),
+            reasons,
+        )
+
+
+    def _momentum_filter(
+        self,
+        df: pd.DataFrame,
+        values: Dict[str, float],
+    ) -> tuple[int, list[str]]:
+
+        score = 0
+        reasons: list[str] = []
+
+        price_change = values[
+            "price_change"
+        ]
+
+        rsi = values[
+            "rsi"
+        ]
+
+        macd = values[
+            "macd"
+        ]
+
+        macd_signal = values[
+            "macd_signal"
+        ]
+
+        histogram = values[
+            "macd_histogram"
+        ]
+
+        previous_rsi = _prev(
+            df,
+            "rsi",
+            rsi,
+        )
+
+        previous_histogram = _prev(
+            df,
+            "macd_histogram",
+            histogram,
+        )
+
+        ema_fast = values[
+            "ema_fast"
+        ]
+
+        ema_slow = values[
+            "ema_slow"
+        ]
+
+        # ----------------------------------------------------
+        # FİYAT
+        # ----------------------------------------------------
+
+        if (
+            0.0
+            <= price_change
+            <= MAX_EARLY_PRICE_CHANGE
+        ):
+
+            score += 20
+
+            reasons.append(
+                "fiyat henüz erken bölgede"
+            )
+
+        elif (
+            -2.0
+            <= price_change
+            < 0.0
+        ):
+
+            score += 10
+
+            reasons.append(
+                "fiyat dipten toparlanıyor"
+            )
+
+        elif (
+            price_change
+            > MAX_CHASE_PRICE_CHANGE
+        ):
+
+            reasons.append(
+                "fiyat fazla kaçmış"
+            )
+
+        # ----------------------------------------------------
+        # RSI
+        # ----------------------------------------------------
+
+        if rsi > previous_rsi:
+
+            score += 15
+
+            reasons.append(
+                "RSI yukarı dönüyor"
+            )
+
+        if (
+            35.0
+            <= rsi
+            <= 55.0
+        ):
+
+            score += 10
+
+            reasons.append(
+                "RSI erken momentum bölgesinde"
+            )
+
+        if rsi >= RSI_HIGH:
+
+            score -= 20
+
+            reasons.append(
+                "RSI aşırı yüksek"
+            )
+
+        # ----------------------------------------------------
+        # MACD
+        # ----------------------------------------------------
+
+        if histogram > previous_histogram:
+
+            score += 15
+
+            reasons.append(
+                "MACD histogram iyileşiyor"
+            )
+
+        if macd > macd_signal:
+
+            score += 10
+
+            reasons.append(
+                "MACD pozitif"
+            )
+
+        # ----------------------------------------------------
+        # EMA
+        # ----------------------------------------------------
+
+        if ema_fast > ema_slow:
+
+            score += 10
+
+            reasons.append(
+                "EMA yapısı pozitif"
+            )
+
+        return (
+            max(
+                0,
+                min(
+                    score,
+                    100,
+                ),
+            ),
+            reasons,
+        )
+
+
+    def _early_curvature(
+        self,
+        df: pd.DataFrame,
+        values: Dict[str, float],
+        volume: Dict[str, Any],
+    ) -> tuple[int, str, list[str]]:
+
+        score = 0
+
+        reasons: list[str] = []
+
+        price = values[
+            "price"
+        ]
+
+        previous_close = _prev(
+            df,
+            "close",
+            price,
+        )
+
+        rsi = values[
+            "rsi"
+        ]
+
+        previous_rsi = _prev(
+            df,
+            "rsi",
+            rsi,
+        )
+
+        previous_rsi_2 = _prev2(
+            df,
+            "rsi",
+            previous_rsi,
+        )
+
+        histogram = values[
+            "macd_histogram"
+        ]
+
+        previous_histogram = _prev(
+            df,
+            "macd_histogram",
+            histogram,
+        )
+
+        previous_histogram_2 = _prev2(
+            df,
+            "macd_histogram",
+            previous_histogram,
+        )
+
+        ratio = _f(
+            volume.get(
+                "volume_ratio"
+            ),
+            0.0,
+        )
+
+        acceleration = _f(
+            volume.get(
+                "volume_acceleration"
+            ),
+            0.0,
+        )
+
+        building = bool(
+            volume.get(
+                "volume_building"
+            )
+        )
+
+        # ----------------------------------------------------
+        # Fiyat kontrollü
+        # ----------------------------------------------------
+
+        price_change = _safe_pct(
+            price,
+            previous_close,
+        )
+
+        if (
+            -3.0
+            <= price_change
+            <= 3.0
+        ):
+
+            score += 10
+
+            reasons.append(
+                "fiyat kontrollü"
+            )
+
+        # ----------------------------------------------------
+        # RSI kıvrımı
+        # ----------------------------------------------------
+
+        if rsi > previous_rsi:
+
+            score += 15
+
+            reasons.append(
+                "RSI kıvrımı başladı"
+            )
+
+        if (
+            rsi > previous_rsi
+            and previous_rsi
+            > previous_rsi_2
+        ):
+
+            score += 10
+
+            reasons.append(
+                "RSI iki mum üst üste yükseliyor"
+            )
+
+        # ----------------------------------------------------
+        # MACD kıvrımı
+        # ----------------------------------------------------
+
+        if histogram > previous_histogram:
+
+            score += 15
+
+            reasons.append(
+                "MACD kıvrımı başladı"
+            )
+
+        if (
+            histogram > previous_histogram
+            and previous_histogram
+            > previous_histogram_2
+        ):
+
+            score += 10
+
+            reasons.append(
+                "MACD histogram iyileşiyor"
+            )
+
+        # ----------------------------------------------------
+        # HACİM kıvrımı
+        # ----------------------------------------------------
+
+        if ratio >= MIN_VOLUME_RATIO:
+
+            score += 15
+
+            reasons.append(
+                "hacim kıvrımı oluşuyor"
+            )
+
+        if acceleration >= MIN_VOLUME_ACCELERATION:
+
+            score += 10
+
+            reasons.append(
+                "hacim ivmesi kıvrımı destekliyor"
+            )
+
+        if building:
+
+            score += 10
+
+            reasons.append(
+                "hacim kademeli yükseliyor"
+            )
+
+        # ----------------------------------------------------
+        # ÜÇLÜ EŞLEŞME
+        # ----------------------------------------------------
+
+        if (
+            rsi > previous_rsi
+            and histogram > previous_histogram
+            and ratio >= MIN_VOLUME_RATIO
+        ):
+
+            score += 15
+
+            reasons.append(
+                "RSI + MACD + hacim birlikte dönüyor"
+            )
+
+        # ----------------------------------------------------
+        # KIVRIM TİPİ
+        # ----------------------------------------------------
+
+        if score >= 80:
+
+            curvature_type = (
+                "KIVRIM ÖNCÜ"
+            )
+
+        elif score >= 60:
+
+            curvature_type = (
+                "KIVRIM GELİŞİYOR"
+            )
+
+        elif score >= 40:
+
+            curvature_type = (
+                "KIVRIM ADAYI"
+            )
+
+        else:
+
+            curvature_type = "YOK"
+
+        return (
+            min(score, 100),
+            curvature_type,
+            reasons,
+                )

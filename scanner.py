@@ -124,15 +124,9 @@ class MarketScanner:
                 #
 
                 if (
-                    result.get(
-                        "signal"
-                    )
-                    == "BUY"
-                    and result.get(
-                        "status"
-                    )
-                    == "KIVRIM ONAY"
-                ):
+    result.get("signal") == "AL"
+    and not result.get("rejected", True)
+):
 
                     message = (
                         V29AlertFormatter.format(

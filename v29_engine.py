@@ -517,6 +517,12 @@ class V29Engine:
                     100
                     / (1 + rs)
                 )
+                    work["rsi"] = (
+                100
+                - (
+                    100
+                    / (1 + rs)
+                )
             )
 
             work["rsi"] = (

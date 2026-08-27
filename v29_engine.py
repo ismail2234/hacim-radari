@@ -562,3 +562,660 @@ class V29Engine:
             )
 
         return work
+    # ========================================================
+    # TEKNİK DEĞERLERİ ÇIKAR
+    # ========================================================
+
+    def _extract_values(
+        self,
+        df: pd.DataFrame,
+    ) -> Dict[str, float]:
+
+        close = _last(
+            df,
+            "close",
+        )
+
+        rsi = _last(
+            df,
+            "rsi",
+            50.0,
+        )
+
+        macd = _last(
+            df,
+            "macd",
+        )
+
+        macd_signal = _last(
+            df,
+            "macd_signal",
+        )
+
+        histogram = _last(
+            df,
+            "macd_histogram",
+            macd - macd_signal,
+        )
+
+        ema_fast = _last(
+            df,
+            "ema_9",
+            close,
+        )
+
+        ema_slow = _last(
+            df,
+            "ema_20",
+            close,
+        )
+
+        previous_close = _prev(
+            df,
+            "close",
+            close,
+        )
+
+        price_change = _safe_pct(
+            close,
+            previous_close,
+        )
+
+        # ----------------------------------------------------
+        # HACİM
+        # ----------------------------------------------------
+
+        volume_try = _last(
+            df,
+            "quote_volume",
+            0.0,
+        )
+
+        if volume_try <= 0:
+            volume_try = _last(
+                df,
+                "volume",
+                0.0,
+            )
+
+        average_volume_try = 0.0
+
+        if "quote_volume" in df.columns:
+
+            average_volume_try = _f(
+                df["quote_volume"]
+                .rolling(
+                    20,
+                    min_periods=1,
+                )
+                .mean()
+                .iloc[-1],
+                0.0,
+            )
+
+        elif "volume" in df.columns:
+
+            average_volume_try = _f(
+                df["volume"]
+                .rolling(
+                    20,
+                    min_periods=1,
+                )
+                .mean()
+                .iloc[-1],
+                0.0,
+            )
+
+        if average_volume_try > 0:
+
+            volume_ratio = (
+                volume_try
+                / average_volume_try
+            )
+
+        else:
+
+            volume_ratio = 1.0
+
+        previous_volume = _prev(
+            df,
+            "quote_volume",
+            0.0,
+        )
+
+        if previous_volume <= 0:
+
+            previous_volume = _prev(
+                df,
+                "volume",
+                volume_try,
+            )
+
+        volume_change_pct = _safe_pct(
+            volume_try,
+            previous_volume,
+        )
+
+        volume_acceleration = (
+            volume_change_pct
+            / 100.0
+        )
+
+        volume_building = (
+            volume_ratio >= MIN_VOLUME_RATIO
+            and volume_acceleration
+            >= MIN_VOLUME_ACCELERATION
+        )
+
+        volume_spike = (
+            volume_ratio
+            >= SPIKE_VOLUME_RATIO
+        )
+
+        return {
+            "price": close,
+            "price_change": price_change,
+            "rsi": rsi,
+            "macd": macd,
+            "macd_signal": macd_signal,
+            "macd_histogram": histogram,
+            "ema_fast": ema_fast,
+            "ema_slow": ema_slow,
+            "volume_try": volume_try,
+            "average_volume_try": average_volume_try,
+            "volume_ratio": volume_ratio,
+            "volume_change_pct": volume_change_pct,
+            "volume_acceleration": volume_acceleration,
+            "volume_building": float(
+                volume_building
+            ),
+            "volume_spike": float(
+                volume_spike
+            ),
+        }
+
+
+    # ========================================================
+    # TREND SKORU
+    # ========================================================
+
+    def _trend_score(
+        self,
+        df: pd.DataFrame,
+        values: Dict[str, float],
+    ) -> tuple[int, list[str]]:
+
+        score = 0
+
+        reasons: list[str] = []
+
+        price = values["price"]
+
+        ema_fast = values["ema_fast"]
+
+        ema_slow = values["ema_slow"]
+
+        previous_ema_fast = _prev(
+            df,
+            "ema_9",
+            ema_fast,
+        )
+
+        previous_ema_slow = _prev(
+            df,
+            "ema_20",
+            ema_slow,
+        )
+
+        if price > ema_fast:
+
+            score += 10
+
+            reasons.append(
+                "fiyat kısa EMA üzerinde"
+            )
+
+        if ema_fast > previous_ema_fast:
+
+            score += 8
+
+            reasons.append(
+                "kısa EMA yukarı dönüyor"
+            )
+
+        if price > ema_slow:
+
+            score += 5
+
+            reasons.append(
+                "fiyat orta EMA üzerinde"
+            )
+
+        if ema_fast > ema_slow:
+
+            score += 7
+
+            reasons.append(
+                "EMA yapısı pozitif"
+            )
+
+        elif ema_fast > previous_ema_slow:
+
+            score += 4
+
+            reasons.append(
+                "EMA sıkışması / erken dönüş"
+            )
+
+        return (
+            min(score, 30),
+            reasons,
+        )
+
+
+    # ========================================================
+    # MOMENTUM
+    # ========================================================
+
+    def _momentum_score(
+        self,
+        df: pd.DataFrame,
+        values: Dict[str, float],
+    ) -> tuple[int, list[str]]:
+
+        score = 0
+
+        reasons: list[str] = []
+
+        rsi = values["rsi"]
+
+        previous_rsi = _prev(
+            df,
+            "rsi",
+            rsi,
+        )
+
+        macd = values["macd"]
+
+        macd_signal = values[
+            "macd_signal"
+        ]
+
+        histogram = values[
+            "macd_histogram"
+        ]
+
+        previous_histogram = _prev(
+            df,
+            "macd_histogram",
+            histogram,
+        )
+
+        # ----------------------------------------------------
+        # RSI
+        # ----------------------------------------------------
+
+        if rsi > previous_rsi:
+
+            score += 8
+
+            reasons.append(
+                "RSI toparlanıyor"
+            )
+
+        if 30 <= rsi <= 42:
+
+            score += 8
+
+            reasons.append(
+                "RSI dipten dönüş bölgesinde"
+            )
+
+        elif 42 < rsi < 50:
+
+            score += 6
+
+            reasons.append(
+                "RSI momentum bölgesine yaklaşıyor"
+            )
+
+        elif 50 <= rsi < RSI_HIGH:
+
+            score += 3
+
+            reasons.append(
+                "RSI pozitif momentumda"
+            )
+
+        # ----------------------------------------------------
+        # MACD
+        # ----------------------------------------------------
+
+        if histogram > previous_histogram:
+
+            score += 8
+
+            reasons.append(
+                "MACD histogram iyileşiyor"
+            )
+
+        if macd > macd_signal:
+
+            score += 7
+
+            reasons.append(
+                "MACD pozitif"
+            )
+
+        elif histogram > previous_histogram:
+
+            score += 6
+
+            reasons.append(
+                "MACD kesişim öncesi toparlanıyor"
+            )
+
+        return (
+            min(score, 30),
+            reasons,
+        )
+
+
+    # ========================================================
+    # HACİM SKORU
+    # ========================================================
+
+    def _volume_score(
+        self,
+        values: Dict[str, float],
+    ) -> tuple[int, list[str]]:
+
+        score = 0
+
+        reasons: list[str] = []
+
+        ratio = values[
+            "volume_ratio"
+        ]
+
+        acceleration = values[
+            "volume_acceleration"
+        ]
+
+        if ratio >= 1.10:
+
+            score += 8
+
+            reasons.append(
+                "hacim normalin üzerinde"
+            )
+
+        if ratio >= 1.25:
+
+            score += 5
+
+            reasons.append(
+                "hacim belirgin şekilde artmış"
+            )
+
+        if ratio >= 1.50:
+
+            score += 5
+
+            reasons.append(
+                "yüksek hacim aktivitesi"
+            )
+
+        if acceleration >= 0.05:
+
+            score += 5
+
+            reasons.append(
+                "hacim ivmesi pozitif"
+            )
+
+        if acceleration >= 0.15:
+
+            score += 4
+
+            reasons.append(
+                "hacim ivmesi güçlü"
+            )
+
+        return (
+            min(score, 25),
+            reasons,
+        )
+
+
+    # ========================================================
+    # KIVRIM
+    # ========================================================
+
+    def _curvature_score(
+        self,
+        df: pd.DataFrame,
+        values: Dict[str, float],
+    ) -> tuple[
+        int,
+        str,
+        int,
+        list[str],
+    ]:
+
+        score = 0
+
+        early = 0
+
+        reasons: list[str] = []
+
+        price = values["price"]
+
+        rsi = values["rsi"]
+
+        previous_close = _prev(
+            df,
+            "close",
+            price,
+        )
+
+        previous_rsi = _prev(
+            df,
+            "rsi",
+            rsi,
+        )
+
+        previous_rsi_2 = _prev2(
+            df,
+            "rsi",
+            previous_rsi,
+        )
+
+        histogram = values[
+            "macd_histogram"
+        ]
+
+        previous_histogram = _prev(
+            df,
+            "macd_histogram",
+            histogram,
+        )
+
+        previous_histogram_2 = _prev2(
+            df,
+            "macd_histogram",
+            previous_histogram,
+        )
+
+        volume_ratio = values[
+            "volume_ratio"
+        ]
+
+        volume_acceleration = values[
+            "volume_acceleration"
+        ]
+
+        price_change = values[
+            "price_change"
+        ]
+
+        # ----------------------------------------------------
+        # FİYAT HENÜZ KAÇMAMIŞ
+        # ----------------------------------------------------
+
+        if (
+            -4.5
+            <= price_change
+            <= 4.5
+        ):
+
+            early += 10
+
+        # ----------------------------------------------------
+        # RSI DÖNÜŞÜ
+        # ----------------------------------------------------
+
+        if rsi > previous_rsi:
+
+            score += 15
+
+            early += 10
+
+            reasons.append(
+                "RSI yön değiştirdi"
+            )
+
+        if (
+            rsi > previous_rsi
+            and previous_rsi
+            > previous_rsi_2
+        ):
+
+            score += 5
+
+            early += 5
+
+            reasons.append(
+                "RSI iki mumdur toparlanıyor"
+            )
+
+        # ----------------------------------------------------
+        # MACD DÖNÜŞÜ
+        # ----------------------------------------------------
+
+        if histogram > previous_histogram:
+
+            score += 15
+
+            early += 10
+
+            reasons.append(
+                "MACD histogram yön değiştirdi"
+            )
+
+        if (
+            histogram > previous_histogram
+            and previous_histogram
+            > previous_histogram_2
+        ):
+
+            score += 5
+
+            early += 5
+
+            reasons.append(
+                "MACD histogram iki mumdur iyileşiyor"
+            )
+
+        # ----------------------------------------------------
+        # HACİM
+        # ----------------------------------------------------
+
+        if volume_ratio >= 1.10:
+
+            score += 10
+
+            early += 5
+
+            reasons.append(
+                "hacim kıvrımı destekliyor"
+            )
+
+        if volume_acceleration >= 0.05:
+
+            score += 10
+
+            early += 5
+
+            reasons.append(
+                "hacim ivmesi kıvrımı destekliyor"
+            )
+
+        # ----------------------------------------------------
+        # FİYAT TOPARLANMASI
+        # ----------------------------------------------------
+
+        if price > previous_close:
+
+            score += 10
+
+            reasons.append(
+                "fiyat toparlanıyor"
+            )
+
+        # ----------------------------------------------------
+        # ANA ERKENLİK BONUSU
+        # ----------------------------------------------------
+
+        if (
+            rsi > previous_rsi
+            and histogram > previous_histogram
+            and volume_ratio >= 1.05
+        ):
+
+            score += 10
+
+            early += 10
+
+            reasons.append(
+                "RSI + MACD + hacim aynı anda dönüyor"
+            )
+
+        # ----------------------------------------------------
+        # KIVRIM TİPİ
+        # ----------------------------------------------------
+
+        if (
+            score >= 60
+            and early >= 35
+        ):
+
+            curvature_type = (
+                "KIVRIM ÖNCÜ"
+            )
+
+        elif (
+            score >= 40
+            and early >= 20
+        ):
+
+            curvature_type = (
+                "KIVRIM GELİŞİYOR"
+            )
+
+        elif score >= 25:
+
+            curvature_type = (
+                "KIVRIM ADAYI"
+            )
+
+        else:
+
+            curvature_type = "YOK"
+
+        return (
+            min(score, 100),
+            curvature_type,
+            min(early, 100),
+            reasons,
+        )

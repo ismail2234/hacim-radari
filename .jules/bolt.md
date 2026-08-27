@@ -1,0 +1,3 @@
+## 2026-03-01 - Batch DataFrame Construction and Vectorized Binning in Indicators
+**Learning:** Calling `df.copy()` and assigning columns iteratively across chained indicator functions (e.g. `add_ichimoku`, `add_structure`, `add_fibonacci`, `add_volume_profile`) causes severe Pandas DataFrame fragmentation and memory allocation overhead. Additionally, `pd.cut()` and `.groupby()` for Volume Profile calculation are significantly slower than NumPy primitives.
+**Action:** Calculate Series vectors individually and construct the resulting `pd.DataFrame` in a single dictionary-to-DataFrame pass. Use `np.digitize` and `np.bincount` instead of `pd.cut` and `groupby` for fixed-bin histogram operations.

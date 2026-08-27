@@ -54,31 +54,35 @@ def calculate_macd(
 
 
 def add_ichimoku(df: pd.DataFrame) -> pd.DataFrame:
-    result = df.copy()
+    high = df["high"]
+    low = df["low"]
 
-    high_9 = result["high"].rolling(9).max()
-    low_9 = result["low"].rolling(9).min()
+    high_9 = high.rolling(9).max()
+    low_9 = low.rolling(9).min()
+    ichimoku_conversion = (high_9 + low_9) / 2.0
 
-    result["ichimoku_conversion"] = (high_9 + low_9) / 2
+    high_26 = high.rolling(26).max()
+    low_26 = low.rolling(26).min()
+    ichimoku_base = (high_26 + low_26) / 2.0
 
-    high_26 = result["high"].rolling(26).max()
-    low_26 = result["low"].rolling(26).min()
+    ichimoku_span_a = (
+        ichimoku_conversion + ichimoku_base
+    ) / 2.0
 
-    result["ichimoku_base"] = (high_26 + low_26) / 2
+    high_52 = high.rolling(52).max()
+    low_52 = low.rolling(52).min()
+    ichimoku_span_b = (high_52 + low_52) / 2.0
 
-    result["ichimoku_span_a"] = (
-        result["ichimoku_conversion"]
-        + result["ichimoku_base"]
-    ) / 2
-
-    high_52 = result["high"].rolling(52).max()
-    low_52 = result["low"].rolling(52).min()
-
-    result["ichimoku_span_b"] = (
-        high_52 + low_52
-    ) / 2
-
-    return result
+    cols = {col: df[col] for col in df.columns}
+    cols.update(
+        {
+            "ichimoku_conversion": ichimoku_conversion,
+            "ichimoku_base": ichimoku_base,
+            "ichimoku_span_a": ichimoku_span_a,
+            "ichimoku_span_b": ichimoku_span_b,
+        }
+    )
+    return pd.DataFrame(cols, index=df.index)
 
 
 def add_structure(
@@ -86,37 +90,40 @@ def add_structure(
     lookback: int = 10,
 ) -> pd.DataFrame:
 
-    result = df.copy()
+    close = df["close"]
+    low = df["low"]
+    high = df["high"]
 
-    result["recent_low"] = (
-        result["low"].rolling(lookback).min()
-    )
-
-    result["recent_high"] = (
-        result["high"].rolling(lookback).max()
-    )
+    recent_low = low.rolling(lookback).min()
+    recent_high = high.rolling(lookback).max()
 
     # Fiyatın dip bölgesine yakınlığı
-    result["near_dip"] = (
-        result["close"]
-        <= result["recent_low"] * 1.025
-    )
+    near_dip = close <= recent_low * 1.025
 
     # Higher-Low yapısı
-    previous_low = result["recent_low"].shift(lookback)
-
-    result["higher_low"] = (
-        result["recent_low"] > previous_low
-    )
+    previous_low = recent_low.shift(lookback)
+    higher_low = recent_low > previous_low
 
     # Kıvrımın ilk tespit koşulu
-    result["curve_up"] = (
-        (result["close"] > result["close"].shift(1))
-        & (result["low"] >= result["low"].shift(1))
-        & (result["close"] > result["ema_7"])
+    ema_7 = df["ema_7"] if "ema_7" in df.columns else calculate_ema(close, 7)
+
+    curve_up = (
+        (close > close.shift(1))
+        & (low >= low.shift(1))
+        & (close > ema_7)
     )
 
-    return result
+    cols = {col: df[col] for col in df.columns}
+    cols.update(
+        {
+            "recent_low": recent_low,
+            "recent_high": recent_high,
+            "near_dip": near_dip,
+            "higher_low": higher_low,
+            "curve_up": curve_up,
+        }
+    )
+    return pd.DataFrame(cols, index=df.index)
 
 
 def add_fibonacci(
@@ -124,38 +131,31 @@ def add_fibonacci(
     lookback: int = 50,
 ) -> pd.DataFrame:
 
-    result = df.copy()
+    high = df["high"]
+    low = df["low"]
+    close = df["close"]
 
-    swing_high = (
-        result["high"].rolling(lookback).max()
+    swing_high = high.rolling(lookback).max()
+    swing_low = low.rolling(lookback).min()
+
+    price_range = (swing_high - swing_low).replace(0, np.nan)
+
+    fib_382 = swing_high - price_range * 0.382
+    fib_500 = swing_high - price_range * 0.500
+    fib_618 = swing_high - price_range * 0.618
+
+    fib_zone = (close >= fib_618) & (close <= fib_382)
+
+    cols = {col: df[col] for col in df.columns}
+    cols.update(
+        {
+            "fib_382": fib_382,
+            "fib_500": fib_500,
+            "fib_618": fib_618,
+            "fib_zone": fib_zone,
+        }
     )
-
-    swing_low = (
-        result["low"].rolling(lookback).min()
-    )
-
-    price_range = (
-        swing_high - swing_low
-    ).replace(0, np.nan)
-
-    result["fib_382"] = (
-        swing_high - price_range * 0.382
-    )
-
-    result["fib_500"] = (
-        swing_high - price_range * 0.500
-    )
-
-    result["fib_618"] = (
-        swing_high - price_range * 0.618
-    )
-
-    result["fib_zone"] = (
-        (result["close"] >= result["fib_618"])
-        & (result["close"] <= result["fib_382"])
-    )
-
-    return result
+    return pd.DataFrame(cols, index=df.index)
 
 
 def add_volume_profile(
@@ -163,67 +163,66 @@ def add_volume_profile(
     bins: int = 20,
 ) -> pd.DataFrame:
 
-    result = df.copy()
+    high = df["high"]
+    low = df["low"]
+    close = df["close"]
+    vol = df["volume"]
 
-    price_low = float(result["low"].min())
-    price_high = float(result["high"].max())
+    price_low = float(low.min())
+    price_high = float(high.max())
 
     if price_high <= price_low:
-        result["volume_profile_level"] = result["close"]
-        result["volume_profile_support"] = False
-        return result
+        volume_profile_level = close
+        volume_profile_support = pd.Series(False, index=df.index)
+    else:
+        edges = np.linspace(
+            price_low,
+            price_high,
+            bins + 1,
+        )
 
-    edges = np.linspace(
-        price_low,
-        price_high,
-        bins + 1,
+        # Optimization: Vectorized binning with np.digitize and aggregation with np.bincount
+        # avoid expensive pandas pd.cut and groupby.sum
+        typical_price = (
+            high.to_numpy()
+            + low.to_numpy()
+            + close.to_numpy()
+        ) / 3.0
+
+        bins_idx = np.clip(
+            np.digitize(typical_price, edges, right=True) - 1,
+            0,
+            bins - 1,
+        )
+
+        profile = np.bincount(
+            bins_idx,
+            weights=vol.to_numpy(),
+            minlength=bins,
+        )
+
+        if profile.size == 0 or profile.sum() == 0:
+            volume_profile_level = close
+            volume_profile_support = pd.Series(False, index=df.index)
+        else:
+            poc_bucket = int(np.argmax(profile))
+            poc_level = float(
+                (edges[poc_bucket] + edges[poc_bucket + 1]) / 2.0
+            )
+
+            volume_profile_level = float(poc_level)
+            volume_profile_support = (
+                (close - poc_level).abs() / close <= 0.02
+            )
+
+    cols = {col: df[col] for col in df.columns}
+    cols.update(
+        {
+            "volume_profile_level": volume_profile_level,
+            "volume_profile_support": volume_profile_support,
+        }
     )
-
-    typical_price = (
-        result["high"]
-        + result["low"]
-        + result["close"]
-    ) / 3
-
-    bucket = pd.cut(
-        typical_price,
-        bins=edges,
-        labels=False,
-        include_lowest=True,
-    )
-
-    profile = (
-        result.assign(_bucket=bucket)
-        .groupby("_bucket", observed=False)["volume"]
-        .sum()
-    )
-
-    if profile.empty:
-        result["volume_profile_level"] = result["close"]
-        result["volume_profile_support"] = False
-        return result
-
-    poc_bucket = int(profile.idxmax())
-
-    poc_level = (
-        edges[poc_bucket]
-        + edges[poc_bucket + 1]
-    ) / 2
-
-    result["volume_profile_level"] = float(
-        poc_level
-    )
-
-    result["volume_profile_support"] = (
-        (
-            result["close"]
-            - poc_level
-        ).abs()
-        / result["close"]
-        <= 0.02
-    )
-
-    return result
+    return pd.DataFrame(cols, index=df.index)
 
 
 def add_indicators(
@@ -251,43 +250,132 @@ def add_indicators(
             + ", ".join(sorted(missing))
         )
 
-    result = df.copy()
+    close = df["close"]
+    high = df["high"]
+    low = df["low"]
+    vol = df["volume"]
 
     # EMA
-    result["ema_7"] = calculate_ema(
-        result["close"], 7
-    )
-
-    result["ema_9"] = calculate_ema(
-        result["close"], 9
-    )
-
-    result["ema_21"] = calculate_ema(
-        result["close"], 21
-    )
-
-    result["ema_50"] = calculate_ema(
-        result["close"], 50
-    )
+    ema_7 = calculate_ema(close, 7)
+    ema_9 = calculate_ema(close, 9)
+    ema_21 = calculate_ema(close, 21)
+    ema_50 = calculate_ema(close, 50)
 
     # RSI
-    result["rsi_14"] = calculate_rsi(
-        result["close"], 14
-    )
+    rsi_14 = calculate_rsi(close, 14)
 
     # MACD
-    (
-        result["macd"],
-        result["macd_signal"],
-        result["macd_histogram"],
-    ) = calculate_macd(
-        result["close"]
+    macd, macd_signal, macd_histogram = calculate_macd(close)
+
+    # Ichimoku
+    high_9 = high.rolling(9).max()
+    low_9 = low.rolling(9).min()
+    ichimoku_conversion = (high_9 + low_9) / 2.0
+
+    high_26 = high.rolling(26).max()
+    low_26 = low.rolling(26).min()
+    ichimoku_base = (high_26 + low_26) / 2.0
+
+    ichimoku_span_a = (
+        ichimoku_conversion + ichimoku_base
+    ) / 2.0
+
+    high_52 = high.rolling(52).max()
+    low_52 = low.rolling(52).min()
+    ichimoku_span_b = (high_52 + low_52) / 2.0
+
+    # Structure
+    lookback = 10
+    recent_low = low.rolling(lookback).min()
+    recent_high = high.rolling(lookback).max()
+    near_dip = close <= recent_low * 1.025
+    previous_low = recent_low.shift(lookback)
+    higher_low = recent_low > previous_low
+    curve_up = (
+        (close > close.shift(1))
+        & (low >= low.shift(1))
+        & (close > ema_7)
     )
 
-    # V28 yapıları
-    result = add_ichimoku(result)
-    result = add_structure(result)
-    result = add_fibonacci(result)
-    result = add_volume_profile(result)
+    # Fibonacci
+    fib_lookback = 50
+    swing_high = high.rolling(fib_lookback).max()
+    swing_low = low.rolling(fib_lookback).min()
+    price_range = (swing_high - swing_low).replace(0, np.nan)
+    fib_382 = swing_high - price_range * 0.382
+    fib_500 = swing_high - price_range * 0.500
+    fib_618 = swing_high - price_range * 0.618
+    fib_zone = (close >= fib_618) & (close <= fib_382)
 
-    return result
+    # Volume Profile
+    price_low = float(low.min())
+    price_high = float(high.max())
+    bins = 20
+    if price_high <= price_low:
+        volume_profile_level = close
+        volume_profile_support = pd.Series(False, index=df.index)
+    else:
+        edges = np.linspace(price_low, price_high, bins + 1)
+        typical_price = (
+            high.to_numpy()
+            + low.to_numpy()
+            + close.to_numpy()
+        ) / 3.0
+
+        bins_idx = np.clip(
+            np.digitize(typical_price, edges, right=True) - 1,
+            0,
+            bins - 1,
+        )
+
+        profile = np.bincount(
+            bins_idx,
+            weights=vol.to_numpy(),
+            minlength=bins,
+        )
+
+        if profile.size == 0 or profile.sum() == 0:
+            volume_profile_level = close
+            volume_profile_support = pd.Series(False, index=df.index)
+        else:
+            poc_bucket = int(np.argmax(profile))
+            poc_level = float(
+                (edges[poc_bucket] + edges[poc_bucket + 1]) / 2.0
+            )
+
+            volume_profile_level = float(poc_level)
+            volume_profile_support = (
+                (close - poc_level).abs() / close <= 0.02
+            )
+
+    # Optimized bulk DataFrame construction: avoids repeated df copies and re-indexing
+    cols = {col: df[col] for col in df.columns}
+    cols.update(
+        {
+            "ema_7": ema_7,
+            "ema_9": ema_9,
+            "ema_21": ema_21,
+            "ema_50": ema_50,
+            "rsi_14": rsi_14,
+            "macd": macd,
+            "macd_signal": macd_signal,
+            "macd_histogram": macd_histogram,
+            "ichimoku_conversion": ichimoku_conversion,
+            "ichimoku_base": ichimoku_base,
+            "ichimoku_span_a": ichimoku_span_a,
+            "ichimoku_span_b": ichimoku_span_b,
+            "recent_low": recent_low,
+            "recent_high": recent_high,
+            "near_dip": near_dip,
+            "higher_low": higher_low,
+            "curve_up": curve_up,
+            "fib_382": fib_382,
+            "fib_500": fib_500,
+            "fib_618": fib_618,
+            "fib_zone": fib_zone,
+            "volume_profile_level": volume_profile_level,
+            "volume_profile_support": volume_profile_support,
+        }
+    )
+
+    return pd.DataFrame(cols, index=df.index)

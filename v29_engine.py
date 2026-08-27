@@ -519,12 +519,15 @@ class V29Engine:
     errors="coerce",
 )
 
-rsi_series = (
-    rsi_series
-    .fillna(50.0)
-    .clip(0, 100)
+rsi_series = rsi_series.where(
+    rsi_series.notna(),
+    50.0,
 )
 
+rsi_series = rsi_series.clip(
+    0,
+    100,
+)
             work["rsi"] = (
                 rsi_series
             )

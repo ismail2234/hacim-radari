@@ -514,12 +514,16 @@ class V29Engine:
 
             # Pandas FutureWarning'i önlemek için
             # infer_objects önce uygulanıyor.
-            rsi_series = (
-                rsi_series
-                .infer_objects(copy=False)
-                .fillna(50.0)
-                .clip(0, 100)
-            )
+            rsi_series = pd.to_numeric(
+    rsi_series,
+    errors="coerce",
+)
+
+rsi_series = (
+    rsi_series
+    .fillna(50.0)
+    .clip(0, 100)
+)
 
             work["rsi"] = (
                 rsi_series

@@ -67,13 +67,13 @@ class V30Backtester:
             end_index,
         ):
 
-            history = df.iloc[
-                : index + 1
-            ].copy()
-
+            # Performance optimization: pass full DataFrame `df` and index `index`
+            # to avoid creating redundant slice copies (`df.iloc[:index+1].copy()`)
+            # for every candle step in the backtest loop.
             analysis = self.engine.analyze(
                 symbol,
-                history,
+                df,
+                idx=index,
             )
 
             if analysis.get(

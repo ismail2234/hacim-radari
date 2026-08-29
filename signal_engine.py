@@ -63,29 +63,38 @@ class V30SignalEngine:
         self,
         symbol: str,
         df: pd.DataFrame,
+        idx: int = -1,
     ) -> dict[str, Any]:
-
+        """
+        Analyze dataframe at a specific index `idx` (defaults to -1 for current candle).
+        Performance optimization: accepting `idx` allows backtesting over full DataFrames
+        without slicing/copying DataFrames repeatedly.
+        """
         if df is None or df.empty:
             return self._empty_result(
                 symbol,
                 "NO_DATA",
             )
 
-        if len(df) < 25:
+        n = len(df)
+        if idx < 0:
+            idx = n + idx
+
+        if idx < 0 or idx >= n:
+            return self._empty_result(
+                symbol,
+                "NO_DATA",
+            )
+
+        if idx < 24:
             return self._empty_result(
                 symbol,
                 "INSUFFICIENT_DATA",
             )
 
-        last = df.iloc[-1]
-
-        price = _safe_float(
-            last.get("close")
-        )
-
-        volume = _safe_float(
-            last.get("quote_volume")
-        )
+        # Fast scalar retrieval at idx
+        price = _safe_float(df["close"].iat[idx])
+        volume = _safe_float(df["quote_volume"].iat[idx])
 
         if price <= 0:
             return self._empty_result(
@@ -108,27 +117,33 @@ class V30SignalEngine:
         # ----------------------------------------------------
 
         curve_score = self._curve_score(
-            df
+            df,
+            idx,
         )
 
         volume_score = self._volume_score(
-            df
+            df,
+            idx,
         )
 
         dip_score = self._dip_score(
-            df
+            df,
+            idx,
         )
 
         momentum_score = self._momentum_score(
-            df
+            df,
+            idx,
         )
 
         late_penalty = self._late_penalty(
-            df
+            df,
+            idx,
         )
 
         fakeout_penalty = self._fakeout_penalty(
-            df
+            df,
+            idx,
         )
 
         # ----------------------------------------------------
@@ -205,12 +220,13 @@ class V30SignalEngine:
     def _curve_score(
         self,
         df: pd.DataFrame,
+        idx: int = -1,
     ) -> float:
 
-        if len(df) < 6:
+        if idx < 5:
             return 0.0
 
-        closes = df["close"].tail(6)
+        closes = df["close"].iloc[idx - 5 : idx + 1]
 
         if closes.isna().any():
             return 0.0
@@ -270,25 +286,22 @@ class V30SignalEngine:
     def _volume_score(
         self,
         df: pd.DataFrame,
+        idx: int = -1,
     ) -> float:
 
-        if len(df) < 20:
+        if idx < 19:
             return 0.0
 
         current = _safe_float(
-            df.iloc[-1]["quote_volume"]
+            df["quote_volume"].iat[idx]
         )
 
         ma5 = _safe_float(
-            df.iloc[-1].get(
-                "volume_ma_5"
-            )
+            df["volume_ma_5"].iat[idx]
         )
 
         ma20 = _safe_float(
-            df.iloc[-1].get(
-                "volume_ma_20"
-            )
+            df["volume_ma_20"].iat[idx]
         )
 
         if current <= 0:
@@ -325,7 +338,7 @@ class V30SignalEngine:
         # Art arda hacim iyileşmesi
         volume_changes = (
             df["quote_volume"]
-            .tail(4)
+            .iloc[max(0, idx - 3) : idx + 1]
             .pct_change()
             .dropna()
         )
@@ -352,17 +365,14 @@ class V30SignalEngine:
     def _dip_score(
         self,
         df: pd.DataFrame,
+        idx: int = -1,
     ) -> float:
 
-        if len(df) < 20:
+        if idx < 19:
             return 0.0
 
-        last = df.iloc[-1]
-
         position = _safe_float(
-            last.get(
-                "position_in_20_range"
-            ),
+            df["position_in_20_range"].iat[idx],
             50.0,
         )
 
@@ -395,21 +405,18 @@ class V30SignalEngine:
     def _momentum_score(
         self,
         df: pd.DataFrame,
+        idx: int = -1,
     ) -> float:
 
-        if len(df) < 6:
+        if idx < 5:
             return 0.0
 
         change3 = _safe_float(
-            df.iloc[-1].get(
-                "price_change_3"
-            )
+            df["price_change_3"].iat[idx]
         )
 
         change5 = _safe_float(
-            df.iloc[-1].get(
-                "price_change_5"
-            )
+            df["price_change_5"].iat[idx]
         )
 
         score = 0.0
@@ -441,15 +448,14 @@ class V30SignalEngine:
     def _late_penalty(
         self,
         df: pd.DataFrame,
+        idx: int = -1,
     ) -> float:
 
-        if len(df) < 6:
+        if idx < 5:
             return 0.0
 
         change5 = _safe_float(
-            df.iloc[-1].get(
-                "price_change_5"
-            )
+            df["price_change_5"].iat[idx]
         )
 
         if change5 <= MAX_LATE_MOVE_PERCENT:
@@ -473,17 +479,18 @@ class V30SignalEngine:
     def _fakeout_penalty(
         self,
         df: pd.DataFrame,
+        idx: int = -1,
     ) -> float:
 
-        if len(df) < 5:
+        if idx < 4:
             return 0.0
 
         current_volume = _safe_float(
-            df.iloc[-1]["quote_volume"]
+            df["quote_volume"].iat[idx]
         )
 
         previous_volume = _safe_float(
-            df.iloc[-2]["quote_volume"]
+            df["quote_volume"].iat[idx - 1]
         )
 
         if previous_volume <= 0:
@@ -495,9 +502,7 @@ class V30SignalEngine:
         )
 
         current_change = _safe_float(
-            df.iloc[-1].get(
-                "price_change_1"
-            )
+            df["price_change_1"].iat[idx]
         )
 
         penalty = 0.0

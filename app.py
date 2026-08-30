@@ -15,7 +15,7 @@ app = Flask(__name__)
 # öncesindeki "dip -> kıvrım -> yapı -> doğrulama" bölgesini yakalamak.
 # ============================================================
 
-BASE_API = os.getenv("BINANCE_TR_API", "https://api.binance.me")
+BASE_API = "https://www.binance.tr"
 INTERVAL = os.getenv("INTERVAL", "5m")
 KLINE_LIMIT = int(os.getenv("KLINE_LIMIT", "300"))
 SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "300"))

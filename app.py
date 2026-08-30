@@ -668,3 +668,421 @@ def score_signal(
         0,
         10
     )
+    # CEZALAR
+    late_penalty = 0.0
+    fakeout_penalty = 0.0
+    breakout_penalty = 0.0
+    divergence_penalty = 0.0
+
+    if ret6 > 3.0:
+        late_penalty = 8.0
+    elif ret6 > 2.0:
+        late_penalty = 4.0
+
+    if spike and ret3 > 1.2:
+        fakeout_penalty = 5.0
+
+    if hi50 > 0 and p >= hi50 * 0.985:
+        breakout_penalty = 6.0
+
+    r_now = rsi(closes, 14)
+    r_prev = rsi(closes[:-5], 14)
+
+    if (
+        pct(p, closes[-6]) > 0.8
+        and r_now + 4 < r_prev
+    ):
+        divergence_penalty = 4.0
+
+    total = clamp(
+        early
+        + dip
+        + structure
+        + volume
+        + momentum
+        - late_penalty
+        - fakeout_penalty
+        - breakout_penalty
+        - divergence_penalty,
+        0,
+        100
+    )
+
+    if (
+        total >= EARLY_BUY_SCORE
+        and early >= 20
+        and dip >= 15
+        and structure >= 12
+    ):
+        status = "EARLY_BUY"
+
+    elif (
+        total >= MIN_SCORE
+        and early >= 17
+        and dip >= 10
+    ):
+        status = "STRONG_WATCH"
+
+    else:
+        status = "WATCH"
+
+    return {
+        "score": round(total, 2),
+        "status": status,
+        "early_curve_score": round(early, 2),
+        "dip_score": round(dip, 2),
+        "structure_score": round(structure, 2),
+        "volume_score": round(volume, 2),
+        "momentum_score": round(momentum, 2),
+        "late_penalty": round(late_penalty, 2),
+        "fakeout_penalty": round(fakeout_penalty, 2),
+        "breakout_penalty": round(breakout_penalty, 2),
+        "divergence_penalty": round(divergence_penalty, 2),
+        "price": p,
+        "volume_ratio": round(vr, 3),
+        "rsi": round(rr, 2),
+        "return_3": round(ret3, 3),
+        "return_6": round(ret6, 3),
+        "time": datetime.fromtimestamp(
+            candles[i]["time"] / 1000,
+            tz=timezone.utc
+        ).isoformat()
+    }
+
+
+# ============================================================
+# TELEGRAM
+# ============================================================
+
+def send_telegram(text):
+
+    if (
+        not TELEGRAM_BOT_TOKEN
+        or not TELEGRAM_CHAT_ID
+    ):
+        print(
+            "[V31 TELEGRAM] Token veya Chat ID eksik.",
+            flush=True
+        )
+        return False
+
+    url = (
+        "https://api.telegram.org/"
+        f"bot{TELEGRAM_BOT_TOKEN}"
+        "/sendMessage"
+    )
+
+    try:
+        r = SESSION.post(
+            url,
+            data={
+                "chat_id": TELEGRAM_CHAT_ID,
+                "text": text
+            },
+            timeout=15
+        )
+
+        print(
+            f"[V31 TELEGRAM] HTTP={r.status_code}",
+            flush=True
+        )
+
+        return r.ok
+
+    except Exception as exc:
+        print(
+            f"[V31 TELEGRAM] HATA={exc}",
+            flush=True
+        )
+        return False
+
+
+# ============================================================
+# MESAJ
+# ============================================================
+
+def format_alert(symbol, s):
+
+    return (
+        "🐋 V31 ERKEN AL ADAYI\n\n"
+
+        f"🪙 #{tr_symbol(symbol)}\n"
+        f"💰 Fiyat: {s['price']:.8f}\n\n"
+
+        f"🎯 Skor: {s['score']:.1f}/100\n"
+        f"📌 Durum: {s['status']}\n\n"
+
+        f"〰️ Erken kıvrım: "
+        f"{s['early_curve_score']:.1f}/30\n"
+
+        f"📍 Dip: "
+        f"{s['dip_score']:.1f}/25\n"
+
+        f"🏗️ Yapı: "
+        f"{s['structure_score']:.1f}/20\n"
+
+        f"📊 Hacim: "
+        f"{s['volume_score']:.1f}/15\n"
+
+        f"🚀 Momentum: "
+        f"{s['momentum_score']:.1f}/10\n"
+
+        f"⏰ Geç hareket cezası: "
+        f"-{s['late_penalty']:.1f}\n"
+
+        f"⚠️ Spike cezası: "
+        f"-{s['fakeout_penalty']:.1f}\n"
+
+        f"📉 Kırılım cezası: "
+        f"-{s['breakout_penalty']:.1f}\n"
+
+        f"🔀 Diverjans cezası: "
+        f"-{s['divergence_penalty']:.1f}\n\n"
+
+        "⚠️ Yatırım tavsiyesi değildir."
+    )
+
+
+# ============================================================
+# TARAMA
+# ============================================================
+
+def scan_once():
+
+    found = []
+
+    try:
+        symbols = get_try_symbols()
+
+    except Exception as exc:
+
+        print(
+            "[V31 FATAL DATA] "
+            f"Symbol listesi alınamadı: {exc}",
+            flush=True
+        )
+
+        return found
+
+    success = 0
+    failed = 0
+
+    for symbol in symbols:
+
+        try:
+
+            candles = get_klines(
+                symbol,
+                min(KLINE_LIMIT, 180)
+            )
+
+            success += 1
+
+            s = score_signal(
+                candles,
+                len(candles) - 1
+            )
+
+            if not s:
+                continue
+
+            if s["status"] not in (
+                "EARLY_BUY",
+                "STRONG_WATCH"
+            ):
+                continue
+
+            key = (
+                symbol,
+                s["time"]
+            )
+
+            if key in last_alert:
+                continue
+
+            text = format_alert(
+                symbol,
+                s
+            )
+
+            print(
+                text,
+                flush=True
+            )
+
+            send_telegram(text)
+
+            last_alert[key] = time.time()
+
+            found.append({
+                "symbol": symbol,
+                **s
+            })
+
+        except Exception as exc:
+
+            failed += 1
+
+            print(
+                f"[V31 DATA ERROR] "
+                f"{symbol}: {exc}",
+                flush=True
+            )
+
+    print(
+        "[V31 RESULT] "
+        f"toplam={len(symbols)} | "
+        f"veri_ok={success} | "
+        f"veri_hata={failed} | "
+        f"aday={len(found)}",
+        flush=True
+    )
+
+    return found
+
+
+# ============================================================
+# WORKER
+# ============================================================
+
+def scanner_loop():
+
+    global scanner_started
+
+    with scanner_lock:
+
+        if scanner_started:
+            return
+
+        scanner_started = True
+
+    print(
+        "[V31 WORKER] Başladı",
+        flush=True
+    )
+
+    print(
+        f"[V31 WORKER] "
+        f"Symbol API={SYMBOL_API}",
+        flush=True
+    )
+
+    print(
+        f"[V31 WORKER] "
+        f"Market API={MARKET_API}",
+        flush=True
+    )
+
+    print(
+        f"[V31 WORKER] "
+        f"Interval={INTERVAL} | "
+        f"Scan={SCAN_INTERVAL}s | "
+        f"MinScore={MIN_SCORE} | "
+        f"EarlyBuy={EARLY_BUY_SCORE}",
+        flush=True
+    )
+
+    while True:
+
+        started = time.time()
+
+        try:
+            scan_once()
+
+        except Exception as exc:
+
+            print(
+                "[V31 WORKER] "
+                f"GENEL HATA: {repr(exc)}",
+                flush=True
+            )
+
+        elapsed = (
+            time.time() - started
+        )
+
+        time.sleep(
+            max(
+                10,
+                SCAN_INTERVAL - elapsed
+            )
+        )
+
+
+def start_scanner():
+
+    t = threading.Thread(
+        target=scanner_loop,
+        daemon=True
+    )
+
+    t.start()
+
+
+# ============================================================
+# FLASK
+# ============================================================
+
+@app.route("/")
+def home():
+
+    return jsonify({
+        "status": "ok",
+        "version": "V31",
+        "symbol_api": SYMBOL_API,
+        "market_api": MARKET_API,
+        "interval": INTERVAL,
+        "scan_interval": SCAN_INTERVAL,
+        "min_score": MIN_SCORE,
+        "early_buy_score": EARLY_BUY_SCORE
+    })
+
+
+@app.route("/health")
+def health():
+
+    return jsonify({
+        "status": "ok",
+        "version": "V31"
+    })
+
+
+@app.route("/api/scan")
+def api_scan():
+
+    try:
+
+        return jsonify({
+            "result": scan_once(),
+            "status": "ok"
+        })
+
+    except Exception as exc:
+
+        return jsonify({
+            "status": "error",
+            "message": str(exc)
+        }), 500
+
+
+# ============================================================
+# BAŞLAT
+# ============================================================
+
+start_scanner()
+
+
+if __name__ == "__main__":
+
+    port = int(
+        os.getenv(
+            "PORT",
+            "8080"
+        )
+    )
+
+    app.run(
+        host="0.0.0.0",
+        port=port,
+        debug=False
+    )

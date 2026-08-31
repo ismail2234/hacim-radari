@@ -852,3 +852,411 @@ def analyze_symbol(
         "examples":
             examples,
 }
+# ============================================================
+# V32 - GEÇMİŞ HAREKET ANALİZİ + API
+# ============================================================
+
+def analyze_symbol(symbol):
+    candles = get_klines(symbol, KLINE_LIMIT)
+    samples = []
+
+    for i in range(60, len(candles) - 6):
+        features = calculate_features(candles, i)
+
+        if features is None:
+            continue
+
+        result = future_result(candles, i)
+
+        if result is None:
+            continue
+
+        samples.append({
+            **features,
+            **result
+        })
+
+    if not samples:
+        return {
+            "symbol": tr_symbol(symbol),
+            "samples": 0,
+            "success_rate": 0,
+            "status": "NO_DATA",
+            "examples": []
+        }
+
+    success = sum(
+        1 for x in samples
+        if x["early_success"]
+    )
+
+    return {
+        "symbol": tr_symbol(symbol),
+        "samples": len(samples),
+        "successes": success,
+        "failures": len(samples) - success,
+        "success_rate": round(
+            success / len(samples) * 100,
+            2
+        ),
+        "average_max_gain": round(
+            mean(x["max_gain"] for x in samples),
+            4
+        ),
+        "average_drawdown": round(
+            mean(x["max_drawdown"] for x in samples),
+            4
+        ),
+        "examples": samples[-20:],
+        "status": "OK"
+    }
+
+
+# ============================================================
+# V32 ERKEN ADAY PUANI
+# ============================================================
+
+def v32_score(candles, i):
+
+    f = calculate_features(candles, i)
+
+    if f is None:
+        return None
+
+    score = 0.0
+
+    # --------------------------------------------------------
+    # 1. Düşüşün yavaşlaması
+    # --------------------------------------------------------
+
+    if f["prev6_ret"] < -0.30:
+        score += 12
+
+    if f["turn_strength"] > 0.20:
+        score += 12
+
+    elif f["turn_strength"] > 0.10:
+        score += 7
+
+    # --------------------------------------------------------
+    # 2. Dip bölgesi
+    # --------------------------------------------------------
+
+    if f["position50"] <= 0.30:
+        score += 12
+
+    elif f["position50"] <= 0.45:
+        score += 8
+
+    elif f["position50"] <= 0.60:
+        score += 4
+
+    # --------------------------------------------------------
+    # 3. Higher-low
+    # --------------------------------------------------------
+
+    if f["higher_low_ratio"] >= 1.002:
+        score += 10
+
+    elif f["higher_low_ratio"] >= 0.998:
+        score += 5
+
+    # --------------------------------------------------------
+    # 4. Hacim uyanışı
+    # --------------------------------------------------------
+
+    if 1.10 <= f["volume_ratio"] <= 2.50:
+        score += 8
+
+    if f["volume_acceleration"] > 1.10:
+        score += 8
+
+    # --------------------------------------------------------
+    # 5. EMA yapısı
+    # --------------------------------------------------------
+
+    if f["ema9_slope"] > 0:
+        score += 5
+
+    if f["ema21_slope"] > -0.05:
+        score += 4
+
+    if f["price_above_ema9"]:
+        score += 4
+
+    # --------------------------------------------------------
+    # 6. RSI
+    # --------------------------------------------------------
+
+    if 35 <= f["rsi14"] <= 55:
+        score += 7
+
+    elif 55 < f["rsi14"] <= 62:
+        score += 3
+
+    # --------------------------------------------------------
+    # 7. Henüz kopmamış olması
+    # --------------------------------------------------------
+
+    if f["breakout_distance"] < 0.50:
+        score += 8
+
+    elif f["breakout_distance"] < 1.00:
+        score += 4
+
+    # --------------------------------------------------------
+    # GEÇ SİNYAL CEZASI
+    # --------------------------------------------------------
+
+    if f["ret3"] > 1.50:
+        score -= 15
+
+    elif f["ret3"] > 1.00:
+        score -= 8
+
+    if f["ret6"] > 3.00:
+        score -= 10
+
+    # Aşırı hacim spike'ı
+    if f["volume_ratio"] > 3.50:
+        score -= 8
+
+    score = clamp(score, 0, 100)
+
+    if score >= 78:
+        status = "V32_EARLY"
+
+    elif score >= 68:
+        status = "V32_WATCH"
+
+    else:
+        status = "NO_SIGNAL"
+
+    return {
+        **f,
+        "score": round(score, 2),
+        "status": status
+    }
+
+
+# ============================================================
+# CANLI TARAMA
+# ============================================================
+
+def scan_once():
+
+    found = []
+
+    try:
+        symbols = get_try_symbols()
+
+    except Exception as exc:
+
+        print(
+            "[V32] Sembol listesi alınamadı:",
+            exc,
+            flush=True
+        )
+
+        return found
+
+    for symbol in symbols:
+
+        try:
+
+            candles = get_klines(
+                symbol,
+                min(KLINE_LIMIT, 300)
+            )
+
+            i = len(candles) - 1
+
+            signal = v32_score(
+                candles,
+                i
+            )
+
+            if signal is None:
+                continue
+
+            if signal["status"] not in (
+                "V32_EARLY",
+                "V32_WATCH"
+            ):
+                continue
+
+            item = {
+                "symbol":
+                    tr_symbol(symbol),
+                **signal
+            }
+
+            print(
+                "[V32 ADAY]",
+                item,
+                flush=True
+            )
+
+            found.append(item)
+
+        except Exception as exc:
+
+            print(
+                f"[V32] {symbol}: {exc}",
+                flush=True
+            )
+
+    print(
+        f"[V32] Tarama tamamlandı | "
+        f"aday={len(found)}",
+        flush=True
+    )
+
+    return found
+
+
+# ============================================================
+# FLASK
+# ============================================================
+
+@app.route("/")
+def home():
+
+    return jsonify({
+        "status": "ok",
+        "version": "V32",
+        "message":
+            "V32 Erken Hareket Motoru çalışıyor",
+        "interval": INTERVAL,
+        "scan_interval_seconds":
+            SCAN_INTERVAL
+    })
+
+
+@app.route("/health")
+def health():
+
+    return jsonify({
+        "status": "ok",
+        "version": "V32"
+    })
+
+
+@app.route("/api/test/<symbol>")
+def api_test(symbol):
+
+    try:
+
+        result = analyze_symbol(
+            symbol
+        )
+
+        return jsonify({
+            "status": "ok",
+            "result": result
+        })
+
+    except Exception as exc:
+
+        return jsonify({
+            "status": "error",
+            "message": str(exc)
+        }), 500
+
+
+@app.route("/api/scan")
+def api_scan():
+
+    try:
+
+        result = scan_once()
+
+        return jsonify({
+            "status": "ok",
+            "result": result
+        })
+
+    except Exception as exc:
+
+        return jsonify({
+            "status": "error",
+            "message": str(exc)
+        }), 500
+
+
+# ============================================================
+# ARKA PLAN TARAMASI
+# ============================================================
+
+def scanner_loop():
+
+    print(
+        "[V32 WORKER] Tarama başlıyor...",
+        flush=True
+    )
+
+    while True:
+
+        started = time.time()
+
+        try:
+            scan_once()
+
+        except Exception as exc:
+
+            print(
+                "[V32 WORKER] Hata:",
+                repr(exc),
+                flush=True
+            )
+
+        elapsed = time.time() - started
+
+        wait = max(
+            10,
+            SCAN_INTERVAL - elapsed
+        )
+
+        time.sleep(wait)
+
+
+def start_scanner():
+
+    global scanner_started
+
+    with scanner_lock:
+
+        if scanner_started:
+            return
+
+        scanner_started = True
+
+    thread = threading.Thread(
+        target=scanner_loop,
+        daemon=True
+    )
+
+    thread.start()
+
+
+# ============================================================
+# BAŞLAT
+# ============================================================
+
+start_scanner()
+
+
+if __name__ == "__main__":
+
+    port = int(
+        os.getenv(
+            "PORT",
+            "8080"
+        )
+    )
+
+    app.run(
+        host="0.0.0.0",
+        port=port,
+        debug=False
+        )

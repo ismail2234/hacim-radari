@@ -2,7 +2,10 @@ import os
 import time
 import threading
 from datetime import datetime, timezone
-from statistics import mean
+# Optimization: replace statistics.mean with fast sum/len calculation.
+# statistics.mean uses exact fraction arithmetic under the hood, making it ~35x slower than built-in sum/len.
+def mean(values):
+    return sum(values) / len(values) if values else 0.0
 
 import requests
 from flask import Flask, jsonify

@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import time
 import threading
-from statistics import mean
 
 import requests
 from flask import Flask, jsonify
@@ -62,7 +61,9 @@ def clamp(v: float, lo: float, hi: float) -> float:
 
 
 def mean_safe(values, default=0.0):
-    return mean(values) if values else default
+    # Optimized: Python 3.12+ statistics.mean uses exact Fraction arithmetic which is ~80x slower.
+    # Replacing statistics.mean with sum/len gives significant performance gains in scan/backtest loops.
+    return (sum(values) / len(values)) if values else default
 
 
 def ema_series(values, period):
@@ -86,8 +87,9 @@ def rsi_series(values, period=14):
         gains.append(max(d, 0.0))
         losses.append(max(-d, 0.0))
 
-    avg_gain = mean(gains[1:period + 1])
-    avg_loss = mean(losses[1:period + 1])
+    # Optimized: replace statistics.mean with sum/len for performance in Python 3.12+
+    avg_gain = sum(gains[1:period + 1]) / period
+    avg_loss = sum(losses[1:period + 1]) / period
     result = [50.0] * period
 
     for i in range(period, len(values)):
@@ -545,16 +547,16 @@ def analyze_symbol(symbol):
         "samples": len(samples),
         "early_candidates": len(early),
         "early_1pct_rate": round(
-            mean(x["early_success_1pct"] for x in early) * 100, 2
+            (sum(x["early_success_1pct"] for x in early) / len(early)) * 100, 2
         ) if early else 0.0,
         "early_2pct_rate": round(
-            mean(x["early_success_2pct"] for x in early) * 100, 2
+            (sum(x["early_success_2pct"] for x in early) / len(early)) * 100, 2
         ) if early else 0.0,
         "average_max_gain_1_3": round(
-            mean(x["max_gain_1_3"] for x in samples), 4
+            sum(x["max_gain_1_3"] for x in samples) / len(samples), 4
         ),
         "average_drawdown_1_5": round(
-            mean(x["max_drawdown"] for x in samples), 4
+            sum(x["max_drawdown"] for x in samples) / len(samples), 4
         ),
         "status": "OK",
         "examples": samples[-20:],

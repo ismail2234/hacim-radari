@@ -330,3 +330,96 @@ def send_telegram(message):
         )
 
         return False
+def format_message(result):
+
+    state = result["state"]
+    price = result["price"]
+    score = result["score"]
+
+    if state == "AL":
+        title = "🟢 HOME/TRY AL SİNYALİ"
+    elif state == "SAT":
+        title = "🔴 HOME/TRY SAT SİNYALİ"
+    else:
+        title = "🟡 HOME/TRY TAKİP"
+
+    return (
+        f"{title}\n\n"
+        f"🪙 #HOME_TRY\n"
+        f"💰 Fiyat: {price:.8f} TL\n\n"
+        f"🎯 Skor: {score}/100\n"
+        f"📊 Hacim: {result['volume_ratio']:.2f}x\n"
+        f"📈 Son 1 mum: {result['ret1']:+.2f}%\n"
+        f"📈 Son 3 mum: {result['ret3']:+.2f}%\n"
+        f"📈 Son 6 mum: {result['ret6']:+.2f}%\n"
+        f"📊 RSI: {result['rsi']:.1f}\n"
+        f"📍 50 mum konumu: "
+        f"{result['position'] * 100:.1f}%\n"
+        f"🏗️ Higher Low: "
+        f"{'EVET' if result['higher_low'] else 'HAYIR'}\n\n"
+        "🕯️ Sadece kapanmış mum kullanıldı.\n"
+        "⚠️ Test sistemidir, yatırım tavsiyesi değildir."
+    )
+
+
+def run():
+
+    global last_state
+    global entry_price
+
+    print(
+        "🎯 HOME/TRY TEST RADARI BAŞLADI",
+        flush=True
+    )
+
+    while True:
+
+        try:
+
+            candles = get_klines()
+
+            result = analyze(candles)
+
+            state = result["state"]
+
+            print(
+                f"[HOME V40] "
+                f"{state} | "
+                f"Skor={result['score']} | "
+                f"Fiyat={result['price']} | "
+                f"RSI={result['rsi']:.1f} | "
+                f"Vol={result['volume_ratio']:.2f}x",
+                flush=True
+            )
+
+            # Sadece durum değiştiğinde Telegram gönder.
+            if state != last_state:
+
+                # AL gerçekleşirse giriş fiyatını kaydet.
+                if state == "AL":
+
+                    entry_price = result["price"]
+
+                # SAT gerçekleşirse pozisyonu kapat.
+                elif state == "SAT":
+
+                    entry_price = None
+
+                message = format_message(result)
+
+                send_telegram(message)
+
+                last_state = state
+
+        except Exception as exc:
+
+            print(
+                f"[HOME V40] HATA: {exc}",
+                flush=True
+            )
+
+        time.sleep(SCAN_SECONDS)
+
+
+if __name__ == "__main__":
+    run()

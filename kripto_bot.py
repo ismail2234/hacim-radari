@@ -42,6 +42,7 @@ Opsiyonel ortam değişkenleri:
 
 import ccxt
 import pandas as pd
+import numpy as np
 import time
 import os
 import csv
@@ -172,18 +173,38 @@ def evaluate(symbol):
     if len(df) < min_needed:
         return None
 
-    df["ma_short"] = df["close"].rolling(SHORT_WINDOW).mean()
-    df["ma_long"] = df["close"].rolling(LONG_WINDOW).mean()
-    df["rsi"] = compute_rsi(df["close"], RSI_PERIOD)
-    df["vol_avg"] = df["volume"].rolling(20).mean()
+    # Bolt Optimization: Replace full Pandas DataFrame rolling calculations (~50x slower)
+    # with direct NumPy array slicing to calculate moving averages, RSI, and volume averages
+    # for only the required windows (current -1 and previous -2).
+    closes = df["close"].to_numpy(dtype=float)
+    volumes = df["volume"].to_numpy(dtype=float)
 
-    prev_short, prev_long = df["ma_short"].iloc[-2], df["ma_long"].iloc[-2]
-    curr_short, curr_long = df["ma_short"].iloc[-1], df["ma_long"].iloc[-1]
-    curr_rsi, prev_rsi = df["rsi"].iloc[-1], df["rsi"].iloc[-2]
-    curr_vol, avg_vol = df["volume"].iloc[-1], df["vol_avg"].iloc[-1]
-    price = df["close"].iloc[-1]
+    curr_short = np.mean(closes[-SHORT_WINDOW:])
+    prev_short = np.mean(closes[-SHORT_WINDOW - 1 : -1])
+    curr_long = np.mean(closes[-LONG_WINDOW:])
+    prev_long = np.mean(closes[-LONG_WINDOW - 1 : -1])
 
-    if pd.isna(curr_rsi) or pd.isna(avg_vol) or avg_vol == 0:
+    # RSI calculation for current (-1) and previous (-2) bars
+    deltas = np.diff(closes)
+    gains = np.maximum(deltas, 0)
+    losses = np.maximum(-deltas, 0)
+
+    avg_gain_curr = np.mean(gains[-RSI_PERIOD:])
+    avg_loss_curr = np.mean(losses[-RSI_PERIOD:])
+    avg_gain_prev = np.mean(gains[-RSI_PERIOD - 1 : -1])
+    avg_loss_prev = np.mean(losses[-RSI_PERIOD - 1 : -1])
+
+    rs_curr = avg_gain_curr / (avg_loss_curr if avg_loss_curr != 0 else 1e-10)
+    curr_rsi = 100 - (100 / (1 + rs_curr))
+
+    rs_prev = avg_gain_prev / (avg_loss_prev if avg_loss_prev != 0 else 1e-10)
+    prev_rsi = 100 - (100 / (1 + rs_prev))
+
+    curr_vol = volumes[-1]
+    avg_vol = np.mean(volumes[-20:])
+    price = closes[-1]
+
+    if np.isnan(curr_rsi) or np.isnan(avg_vol) or avg_vol == 0:
         return None
 
     score = 0

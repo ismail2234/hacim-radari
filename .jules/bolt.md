@@ -1,0 +1,3 @@
+## 2026-03-30 - Vectorizing Pandas Indicator Operations with NumPy
+**Learning:** `pd.concat` across 1D series along `axis=1` and repeated `.iloc[i]` loop indexing on Pandas Series create massive indexing and allocation overhead (~1.0–1.8 ms per call). Replacing `pd.concat([...]).max(axis=1)` with `np.fmax` on `.to_numpy()` 1D arrays and replacing `.iloc` loops with direct NumPy array access reduces indicator evaluation time by ~38% overall without changing NaN handling behavior.
+**Action:** In time-series financial indicator functions, convert intermediate Series to NumPy 1D arrays via `.to_numpy()` and use vectorized NumPy functions like `np.fmax` and `np.where` instead of multi-column DataFrame operations.

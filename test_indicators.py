@@ -51,3 +51,10 @@ def test_find_recent_cross_up_no_crossover():
     b = pd.Series([2.0, 2.0, 2.0, 2.0])
     found, offset = find_recent_cross_up(a, b, lookback=3)
     assert found is False
+
+
+def test_compute_atr_empty_dataframe():
+    from kripto_bot import compute_atr
+    df = pd.DataFrame(columns=["high", "low", "close"])
+    atr = compute_atr(df, period=14)
+    assert atr.empty

@@ -11,7 +11,8 @@ bota hiçbir etkisi yoktur. Sadece kendi bilgisayarında matematiğin doğru
 """
 
 import pandas as pd
-from kripto_bot import compute_rsi, is_breakout, find_recent_cross_up
+import numpy as np
+from kripto_bot import compute_rsi, is_breakout, find_recent_cross_up, compute_atr, compute_adx
 
 
 def test_rsi_all_gains_is_near_100():
@@ -51,3 +52,25 @@ def test_find_recent_cross_up_no_crossover():
     b = pd.Series([2.0, 2.0, 2.0, 2.0])
     found, offset = find_recent_cross_up(a, b, lookback=3)
     assert found is False
+
+
+def test_compute_atr_calculation():
+    highs = [10.0, 12.0, 15.0, 14.0, 16.0] * 4
+    lows = [8.0, 9.0, 11.0, 10.0, 12.0] * 4
+    closes = [9.0, 11.0, 14.0, 12.0, 15.0] * 4
+    df = pd.DataFrame({"high": highs, "low": lows, "close": closes})
+
+    atr = compute_atr(df, period=14)
+    assert not pd.isna(atr.iloc[-1])
+    assert atr.iloc[-1] > 0
+
+
+def test_compute_adx_calculation():
+    highs = [10.0, 12.0, 15.0, 14.0, 16.0] * 8
+    lows = [8.0, 9.0, 11.0, 10.0, 12.0] * 8
+    closes = [9.0, 11.0, 14.0, 12.0, 15.0] * 8
+    df = pd.DataFrame({"high": highs, "low": lows, "close": closes})
+
+    adx = compute_adx(df, period=14)
+    assert not pd.isna(adx.iloc[-1])
+    assert 0 <= adx.iloc[-1] <= 100

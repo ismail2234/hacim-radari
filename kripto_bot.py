@@ -61,6 +61,7 @@ Diğer opsiyonel ortam değişkenleri (önceki sürümle aynı):
 from __future__ import annotations
 
 import ccxt
+import numpy as np
 import pandas as pd
 import time
 import os
@@ -402,6 +403,7 @@ def log_anomaly(symbol: str, a: Dict[str, float]) -> None:
 
 # ==================== SANAL PROP-FİRMA HESABI ====================
 
+
 def get_open_virtual_position(symbol: str) -> Optional[sqlite3.Row]:
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
@@ -528,7 +530,10 @@ def check_and_update_virtual_position(symbol: str, df: pd.DataFrame) -> Optional
     elif high >= pos["take_profit"]:
         pnl = close_virtual_position(pos["id"], pos["entry_price"], pos["size_units"], pos["take_profit"], "closed_tp")
         return {"symbol": symbol, "result": "TP", "pnl": pnl}
-    return None def build_virtual_close_card(c: Dict[str, Any]) -> str:
+    return None
+
+
+def build_virtual_close_card(c: Dict[str, Any]) -> str:
     name = c["symbol"].replace(f"/{QUOTE_CURRENCY}", "")
     emoji = "✅" if c["result"] == "TP" else "🛑"
     sonuc = "Kâr (TP)" if c["result"] == "TP" else "Zarar (SL)"
@@ -541,7 +546,10 @@ def send_virtual_close_alerts(closes: List[Dict[str, Any]]) -> None:
     balance = get_virtual_balance()
     cards = [build_virtual_close_card(c) for c in closes]
     msg = "📒 <b>Sanal Prop-Firma Hesabı — İşlem Kapandı</b>\n\n" + "\n".join(cards) + f"\n\nGüncel bakiye: {balance:.2f} {QUOTE_CURRENCY}"
-    send_telegram(msg) def build_status_card() -> str:
+    send_telegram(msg)
+
+
+def build_status_card() -> str:
     balance = get_virtual_balance()
     today_pnl = get_today_pnl()
     highest_eod = get_highest_eod_balance()
@@ -574,6 +582,7 @@ def send_virtual_close_alerts(closes: List[Dict[str, Any]]) -> None:
     lines.append("━━━━━━━━━━━━━━")
     return "\n".join(lines) # ==================== GÖSTERGELER ====================
 
+
 def compute_rsi(series: pd.Series, period: int) -> pd.Series:
     delta = series.diff()
     gain = delta.clip(lower=0)
@@ -595,12 +604,9 @@ def compute_macd(series: pd.Series, fast: int = 12, slow: int = 26, signal: int 
 def compute_atr(df: pd.DataFrame, period: int) -> pd.Series:
     high, low, close = df["high"], df["low"], df["close"]
     prev_close = close.shift(1)
-    tr = pd.concat([
-        high - low,
-        (high - prev_close).abs(),
-        (low - prev_close).abs(),
-    ], axis=1).max(axis=1)
-    return tr.rolling(period).mean()
+    # Optimization: replace pd.concat multi-column DataFrame overhead with vectorized np.fmax
+    tr = np.fmax(high - low, np.fmax((high - prev_close).abs(), (low - prev_close).abs()))
+    return pd.Series(tr, index=df.index).rolling(period).mean()
 
 
 def compute_adx(df: pd.DataFrame, period: int) -> pd.Series:
@@ -610,12 +616,9 @@ def compute_adx(df: pd.DataFrame, period: int) -> pd.Series:
     plus_dm = up_move.where((up_move > down_move) & (up_move > 0), 0.0)
     minus_dm = down_move.where((down_move > up_move) & (down_move > 0), 0.0)
     prev_close = close.shift(1)
-    tr = pd.concat([
-        high - low,
-        (high - prev_close).abs(),
-        (low - prev_close).abs(),
-    ], axis=1).max(axis=1)
-    atr = tr.ewm(alpha=1 / period, adjust=False).mean().replace(0, 1e-10)
+    # Optimization: replace pd.concat multi-column DataFrame overhead with vectorized np.fmax
+    tr = np.fmax(high - low, np.fmax((high - prev_close).abs(), (low - prev_close).abs()))
+    atr = pd.Series(tr, index=df.index).ewm(alpha=1 / period, adjust=False).mean().replace(0, 1e-10)
     plus_di = 100 * plus_dm.ewm(alpha=1 / period, adjust=False).mean() / atr
     minus_di = 100 * minus_dm.ewm(alpha=1 / period, adjust=False).mean() / atr
     dx = ((plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, 1e-10)) * 100
@@ -623,15 +626,18 @@ def compute_adx(df: pd.DataFrame, period: int) -> pd.Series:
 
 
 def find_recent_cross_up(a: pd.Series, b: pd.Series, lookback: int) -> Tuple[bool, Optional[int]]:
-    n = len(a)
+    # Optimization: convert Series to NumPy arrays to avoid pandas .iloc indexing overhead in loop
+    a_vals = a.to_numpy()
+    b_vals = b.to_numpy()
+    n = len(a_vals)
     max_back = min(lookback, n - 1)
     for offset in range(max_back):
         i = n - 1 - offset
         j = i - 1
         if j < 0:
             break
-        ai, aj, bi, bj = a.iloc[i], a.iloc[j], b.iloc[i], b.iloc[j]
-        if pd.isna(ai) or pd.isna(aj) or pd.isna(bi) or pd.isna(bj):
+        ai, aj, bi, bj = a_vals[i], a_vals[j], b_vals[i], b_vals[j]
+        if np.isnan(ai) or np.isnan(aj) or np.isnan(bi) or np.isnan(bj):
             continue
         if aj <= bj and ai > bi:
             return True, offset
@@ -644,7 +650,7 @@ def is_breakout(df: pd.DataFrame, lookback: int) -> bool:
     window = df["close"].iloc[-(lookback + 1):-1]
     if window.isna().all():
         return False
-    return df["close"].iloc[-1] > window.max()
+    return bool(df["close"].iloc[-1] > window.max())
 
 
 def detect_anomaly(df: pd.DataFrame, threshold_pct: float, vol_mult: float, window: int) -> Optional[Dict[str, float]]:
@@ -673,6 +679,7 @@ def confidence_label(score: float) -> str:
     elif score >= 65:
         return "🟢🟢 Orta-Güçlü"
     return "🟢 Standart" # ==================== ANALİZ / STRATEJİ ====================
+
 
 def evaluate(symbol: str) -> Optional[Dict[str, Any]]:
     fetch_limit = max(LONG_WINDOW, BREAKOUT_LOOKBACK, ADX_PERIOD * 2, 40) + CROSS_LOOKBACK + 5
@@ -768,7 +775,10 @@ def get_market_trend() -> str:
         ma_long = df["close"].rolling(LONG_WINDOW).mean().iloc[-1]
         return "yukarı" if ma_short > ma_long else "aşağı"
     except Exception:
-        return "bilinmiyor" def scan_once(symbols: List[str]) -> Tuple[List[Tuple[str, dict]], List[Tuple[str, dict]], List[Dict[str, Any]]]:
+        return "bilinmiyor"
+
+
+def scan_once(symbols: List[str]) -> Tuple[List[Tuple[str, dict]], List[Tuple[str, dict]], List[Dict[str, Any]]]:
     now = time.time()
     setup_hits: List[Tuple[str, dict]] = []
     anomaly_hits: List[Tuple[str, dict]] = []
@@ -822,6 +832,7 @@ def get_market_trend() -> str:
 
 # ==================== MESAJ KARTLARI ====================
 
+
 def build_setup_card(symbol: str, r: Dict[str, Any]) -> str:
     name = symbol.replace(f"/{QUOTE_CURRENCY}", "")
     conf = confidence_label(r["score"])
@@ -846,7 +857,10 @@ def build_setup_card(symbol: str, r: Dict[str, Any]) -> str:
     for d in r["details"]:
         lines.append(f"• {d}")
     lines.append("━━━━━━━━━━━━━━")
-    return "\n".join(lines) def build_anomaly_card(symbol: str, a: Dict[str, float]) -> str:
+    return "\n".join(lines)
+
+
+def build_anomaly_card(symbol: str, a: Dict[str, float]) -> str:
     name = symbol.replace(f"/{QUOTE_CURRENCY}", "")
     lines = [
         f"⚡ <b>ANOMALİ: {name}/{QUOTE_CURRENCY}</b>",
@@ -901,6 +915,7 @@ def _sleep_with_shutdown_check(total_seconds: float, step: float = 1.0) -> None:
 
 
 # ==================== ANA DÖNGÜ ====================
+
 
 def run_bot() -> None:
     signal.signal(signal.SIGTERM, _handle_shutdown_signal)
@@ -1018,7 +1033,10 @@ def run_bot() -> None:
             _sleep_with_shutdown_check(30)
 
     logger.info("Bot durduruldu.")
-    send_telegram("🛑 Bot durduruldu (yeniden başlatma/deploy nedeniyle olabilir).") if __name__ == "__main__":
+    send_telegram("🛑 Bot durduruldu (yeniden başlatma/deploy nedeniyle olabilir).")
+
+
+if __name__ == "__main__":
     run_bot()
     
     

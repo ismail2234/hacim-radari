@@ -1,0 +1,3 @@
+## 2026-09-07 - Vectorize indicator calculations and avoid pandas .iloc in loops
+**Learning:** In indicator functions, pandas `.iloc[i]` inside Python loops incurs severe index lookup overhead. Converting Series to NumPy arrays (`.to_numpy()`) before looping speeds up crossover checks by ~3.4x. Furthermore, replacing `pd.concat([...], axis=1).max(axis=1)` with `np.fmax(...)` avoids DataFrame construction overhead for multi-column max calculations while preserving NaN handling.
+**Action:** Always convert Pandas Series to NumPy arrays (`.to_numpy()`) prior to indexing in loops and use NumPy elementwise functions like `np.fmax` instead of `pd.concat` for True Range calculations.

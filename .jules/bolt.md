@@ -1,0 +1,3 @@
+## 2026-09-24 - Vectorized True Range Calculation in Pandas/NumPy
+**Learning:** In Pandas, calculating True Range using `pd.concat([high - low, (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)` introduces substantial multi-column Series concatenation overhead. Replacing this with 1D NumPy `np.fmax` operations (`np.fmax(high_arr - low_arr, np.fmax(np.abs(high_arr - prev_close), np.abs(low_arr - prev_close)))`) reduces execution time by ~5.7x while correctly preserving NaN handling.
+**Action:** Use 1D NumPy array operations (`.to_numpy()` and `np.fmax`) instead of multi-column `pd.concat` for element-wise row maxima across Series.

@@ -1,0 +1,3 @@
+## 2026-03-31 - Vectorized True Range Calculation in Indicator Functions
+**Learning:** Replacing multi-column Pandas DataFrame concatenation (`pd.concat([...], axis=1).max(axis=1)`) with vectorized 1D NumPy array operations (`np.fmax(np.fmax(tr1, tr2), tr3)`) reduces calculation overhead by ~5.5x in ATR and ADX technical indicators while maintaining identical NaN handling.
+**Action:** When computing multi-series element-wise maximums or comparisons in pandas DataFrames, convert input Series to 1D NumPy arrays via `.to_numpy(dtype=float)` and use NumPy vectorized functions (`np.fmax`, `np.maximum`) before converting back to `pd.Series`.

@@ -11,7 +11,7 @@ bota hiçbir etkisi yoktur. Sadece kendi bilgisayarında matematiğin doğru
 """
 
 import pandas as pd
-from kripto_bot import compute_rsi, is_breakout, find_recent_cross_up
+from kripto_bot import compute_rsi, compute_atr, compute_adx, is_breakout, find_recent_cross_up
 
 
 def test_rsi_all_gains_is_near_100():
@@ -51,3 +51,11 @@ def test_find_recent_cross_up_no_crossover():
     b = pd.Series([2.0, 2.0, 2.0, 2.0])
     found, offset = find_recent_cross_up(a, b, lookback=3)
     assert found is False
+
+
+def test_empty_dataframe_handling():
+    empty_df = pd.DataFrame({"high": [], "low": [], "close": [], "volume": []})
+    atr = compute_atr(empty_df, 14)
+    adx = compute_adx(empty_df, 14)
+    assert len(atr) == 0
+    assert len(adx) == 0

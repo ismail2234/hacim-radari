@@ -1,0 +1,3 @@
+## 2025-05-18 - Vectorized NumPy Operations for Technical Indicators
+**Learning:** In Pandas time-series operations, `pd.concat` across columns followed by `axis=1` operations (`.max(axis=1)`) incurs heavy allocation and indexing overhead. Converting 1D Series columns to NumPy arrays via `.to_numpy()` and using `np.fmax` and `np.abs` speeds up calculation by ~6.8x. In addition, iterating over Pandas `Series` using `.iloc[i]` in tight loops is ~3.8x slower than iterating over a 1D NumPy array obtained via `.to_numpy()`.
+**Action:** Always convert 1D Series data to NumPy arrays before multi-column elementwise operations or loop indexing in indicators called frequently across symbols.

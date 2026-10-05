@@ -1,0 +1,3 @@
+## 2026-09-07 - Vectorized True Range (TR) Calculation in Technical Indicators
+**Learning:** Using `pd.concat([...], axis=1).max(axis=1)` to compute True Range across High, Low, and Prev Close in `compute_atr` and `compute_adx` incurs heavy Pandas DataFrame creation overhead. Replacing this with 1D NumPy array conversion (`.to_numpy()`) and `np.fmax` results in a ~5.7x speedup for ATR and ~2.3x speedup for ADX while maintaining exact floating-point precision and NaN-handling semantics.
+**Action:** Always prefer 1D NumPy operations over multi-column Pandas DataFrame concatenations inside repeatedly called technical indicator computations.

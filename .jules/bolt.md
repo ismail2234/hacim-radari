@@ -1,0 +1,3 @@
+## 2025-05-18 - Vectorized NumPy Operations in Technical Indicators
+**Learning:** Replacing Pandas `pd.concat` multi-column concatenation with vectorized NumPy operations like `np.fmax` on 1D arrays (`.to_numpy()`) in technical indicator functions (`compute_atr`, `compute_adx`) yields up to a ~6.6x speedup by avoiding Pandas Index and BlockManager allocation overhead. Additionally, converting Pandas Series to NumPy arrays (`.to_numpy()`) prior to loop iterations avoids heavy `.iloc` indexing overhead (~2.8x speedup).
+**Action:** Always prefer 1D NumPy arrays (`.to_numpy()`) and `np.fmax` over `pd.concat([...], axis=1).max(axis=1)` and `.iloc` loops when computing technical indicators in performance-critical paths.

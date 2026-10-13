@@ -26,6 +26,13 @@ def test_rsi_all_losses_is_near_0():
     assert rsi.iloc[-1] < 5
 
 
+def test_rsi_short_series_returns_nans():
+    prices = pd.Series([10.0, 11.0, 12.0])
+    rsi = compute_rsi(prices, period=14)
+    assert len(rsi) == len(prices)
+    assert rsi.isna().all()
+
+
 def test_breakout_detects_new_local_high():
     closes = [10.0] * 21 + [15.0]
     df = pd.DataFrame({"close": closes})

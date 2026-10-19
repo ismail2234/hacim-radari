@@ -1,0 +1,3 @@
+## 2025-05-18 - NumPy array slicing vs Pandas Series window operations in `is_breakout`
+**Learning:** Using `Series.iloc[-lookback:].max()` creates substantial object creation overhead in Pandas. Converting the Series to a NumPy array via `.to_numpy()` and using `np.nanmax()` speeds up window evaluations by ~8x. Additionally, NumPy comparisons return `numpy.bool_` objects which fail identity checks like `result is True`; explicit `bool()` casting is necessary.
+**Action:** When evaluating technical indicators or rolling window breakouts, convert Pandas Series to 1D NumPy arrays and explicitly wrap comparison return values with `bool()`.

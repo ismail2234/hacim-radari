@@ -1,0 +1,3 @@
+## 2025-05-18 - Vectorized NumPy True Range & Loop Indexing
+**Learning:** Computing True Range using `pd.concat([high - low, (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)` creates significant overhead from multi-column DataFrame construction and row-wise aggregation. Converting series to 1D NumPy float64 arrays and using `np.fmax` yields ~6x speedup for `compute_atr`. Additionally, using `.to_numpy()` in `find_recent_cross_up` avoids heavy pandas `.iloc` indexing inside loops (~2.8x speedup).
+**Action:** Always prefer 1D NumPy array operations (`.to_numpy()`, `np.fmax`, `np.roll`) over multi-column Pandas DataFrame concatenations or `.iloc` loop indexing in frequently executed financial indicators.

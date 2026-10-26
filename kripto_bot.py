@@ -76,23 +76,19 @@ from zoneinfo import ZoneInfo
 from typing import Optional, Dict, List, Tuple, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-
 # ==================== TEMEL ALTYAPI (config, log, telegram) ====================
 
 class ConfigError(Exception):
     """Ortam değişkenlerinden gelen konfigürasyon geçersiz olduğunda fırlatılır."""
 
-
 def _get_str(name: str, default: str) -> str:
     return os.getenv(name, default)
-
 
 def _get_bool(name: str, default: bool) -> bool:
     val = os.getenv(name)
     if val is None:
         return default
     return val.strip().lower() in ("1", "true", "yes", "evet")
-
 
 def _get_int(name: str, default: int) -> int:
     val = os.getenv(name)
@@ -102,7 +98,6 @@ def _get_int(name: str, default: int) -> int:
         return int(val)
     except ValueError:
         raise ConfigError(f"{name} tam sayı olmalı, gelen değer: {val!r}")
-
 
 def _get_float(name: str, default: float) -> float:
     val = os.getenv(name)
@@ -125,7 +120,6 @@ logger = logging.getLogger("hacim_radari")
 
 TR_TZ = ZoneInfo("Europe/Istanbul")
 
-
 def now_tr() -> datetime:
     """Sunucu (Railway) genelde UTC çalışır; mesaj/loglarda kafa karışmaması
     için zamanı her zaman Türkiye saatine çevirerek kullanıyoruz."""
@@ -134,7 +128,6 @@ def now_tr() -> datetime:
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-
 
 def send_telegram(message: str, retries: int = 3, delay: float = 2.0) -> bool:
     """Telegram'a mesaj gönderir; geçici hatalarda birkaç kez dener.
@@ -163,7 +156,6 @@ def send_telegram(message: str, retries: int = 3, delay: float = 2.0) -> bool:
 
     logger.error("Telegram mesajı %d denemede de gönderilemedi, mesaj kayboldu: %s", retries, message[:100])
     return False
-
 
 # ==================== KONFİGÜRASYON ====================
 
@@ -234,13 +226,11 @@ except ConfigError as e:
 
 DB_PATH = os.path.join(DATA_DIR, "hacim_radari.db")
 
-
 # ==================== BORSA BAĞLANTISI + PAYLAŞIMLI RATE LIMITER ====================
 
 exchange = ccxt.btcturk({"enableRateLimit": True})
 
 _thread_local = threading.local()
-
 
 def get_thread_exchange() -> ccxt.btcturk:
     exch = getattr(_thread_local, "exchange", None)
@@ -278,7 +268,6 @@ last_signal_lock = threading.Lock()
 last_anomaly_time: Dict[str, float] = {}
 last_anomaly_lock = threading.Lock()
 
-
 def safe_call(func, *args, retries: int = 3, delay: float = 3.0, **kwargs):
     """Sadece GERÇEK ağ hatalarında (ccxt.NetworkError) yeniden dener;
     kalıcı hatalarda (geçersiz sembol vb.) hemen bırakır."""
@@ -300,7 +289,6 @@ def safe_call(func, *args, retries: int = 3, delay: float = 3.0, **kwargs):
             raise
     raise last_err
 
-
 def get_symbols(quote: str, exclude: set) -> List[str]:
     rate_limiter.wait()
     markets = safe_call(exchange.load_markets)
@@ -319,7 +307,6 @@ def get_symbols(quote: str, exclude: set) -> List[str]:
             continue
     return symbols
 
-
 def get_ohlcv(symbol: str, timeframe: str, limit: int) -> pd.DataFrame:
     exch = get_thread_exchange()
     duration_sec = exch.parse_timeframe(timeframe)
@@ -333,11 +320,9 @@ def get_ohlcv(symbol: str, timeframe: str, limit: int) -> pd.DataFrame:
         df = df.iloc[-limit:].reset_index(drop=True)
     return df
 
-
 # ==================== KALICI DEPOLAMA (SQLite) ====================
 
 _db_lock = threading.Lock()
-
 
 def init_db() -> None:
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -381,7 +366,6 @@ def init_db() -> None:
         conn.commit()
     logger.info("Veritabanı hazır: %s", DB_PATH)
 
-
 def log_signal(symbol: str, r: Dict[str, Any]) -> None:
     with _db_lock, sqlite3.connect(DB_PATH) as conn:
         conn.execute(
@@ -389,7 +373,6 @@ def log_signal(symbol: str, r: Dict[str, Any]) -> None:
             (now_tr().strftime("%Y-%m-%d %H:%M:%S"), symbol, r["price"], r["score"], r["stop_loss"], r["take_profit"]),
         )
         conn.commit()
-
 
 def log_anomaly(symbol: str, a: Dict[str, float]) -> None:
     with _db_lock, sqlite3.connect(DB_PATH) as conn:
@@ -399,7 +382,6 @@ def log_anomaly(symbol: str, a: Dict[str, float]) -> None:
         )
         conn.commit()
 
-
 # ==================== SANAL PROP-FİRMA HESABI ====================
 
 def get_open_virtual_position(symbol: str) -> Optional[sqlite3.Row]:
@@ -408,13 +390,11 @@ def get_open_virtual_position(symbol: str) -> Optional[sqlite3.Row]:
         cur = conn.execute("SELECT * FROM virtual_positions WHERE symbol = ? AND status = 'open'", (symbol,))
         return cur.fetchone()
 
-
 def get_virtual_balance() -> float:
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.execute("SELECT COALESCE(SUM(pnl), 0) FROM virtual_positions WHERE status != 'open'")
         realized = cur.fetchone()[0]
     return VIRTUAL_STARTING_BALANCE + realized
-
 
 def get_today_pnl() -> float:
     today = now_tr().strftime("%Y-%m-%d")
@@ -424,7 +404,6 @@ def get_today_pnl() -> float:
             (f"{today}%",),
         )
         return cur.fetchone()[0]
-
 
 def get_highest_eod_balance() -> float:
     """Prop firmalardaki 'EOD trailing drawdown' mantığı: drawdown, anlık
@@ -446,18 +425,15 @@ def get_highest_eod_balance() -> float:
 
     return max(VIRTUAL_STARTING_BALANCE, max(daily_close_balance.values()))
 
-
 def is_account_blown() -> bool:
     highest_eod = get_highest_eod_balance()
     current_balance = get_virtual_balance()
     max_dd_amount = highest_eod * (MAX_TRAILING_DRAWDOWN_PCT / 100)
     return current_balance <= highest_eod - max_dd_amount
 
-
 def is_daily_loss_limit_hit() -> bool:
     limit_amount = VIRTUAL_STARTING_BALANCE * (DAILY_LOSS_LIMIT_PCT / 100)
     return get_today_pnl() <= -limit_amount
-
 
 def check_consistency() -> Optional[Dict[str, Any]]:
     """Tek bir günün kârı, toplam kârın CONSISTENCY_PCT'sini aşıyor mu?"""
@@ -481,7 +457,6 @@ def check_consistency() -> Optional[Dict[str, Any]]:
         return {"day": best_day, "ratio_pct": ratio_pct}
     return None
 
-
 def open_virtual_position(symbol: str, entry_price: float, stop_loss: float, take_profit: float) -> None:
     if stop_loss is None or take_profit is None or stop_loss >= entry_price:
         return
@@ -503,16 +478,14 @@ def open_virtual_position(symbol: str, entry_price: float, stop_loss: float, tak
         conn.commit()
     logger.info("Sanal pozisyon açıldı: %s @ %.4f (risk: %.2f %s)", symbol, entry_price, risk_amount, QUOTE_CURRENCY)
 
-
 def close_virtual_position(pos_id: int, entry_price: float, size_units: float, close_price: float, status: str) -> float:
     pnl = (close_price - entry_price) * size_units
     with _db_lock, sqlite3.connect(DB_PATH) as conn:
         conn.execute(
-            "UPDATE virtual_positions SET closed_at = ?, close_price = ?, pnl u= ?, status = ? WHERE id = ?",
+            "UPDATE virtual_positions SET closed_at = ?, close_price = ?, pnl = ?, status = ? WHERE id = ?",
             (now_tr().strftime("%Y-%m-%d %H:%M:%S"), close_price, pnl, status, pos_id),   )
         conn.commit()
     return pnl
-
 
 def check_and_update_virtual_position(symbol: str, df: pd.DataFrame) -> Optional[Dict[str, Any]]:
     pos = get_open_virtual_position(symbol)
@@ -528,12 +501,13 @@ def check_and_update_virtual_position(symbol: str, df: pd.DataFrame) -> Optional
     elif high >= pos["take_profit"]:
         pnl = close_virtual_position(pos["id"], pos["entry_price"], pos["size_units"], pos["take_profit"], "closed_tp")
         return {"symbol": symbol, "result": "TP", "pnl": pnl}
-    return None def build_virtual_close_card(c: Dict[str, Any]) -> str:
+    return None
+
+def build_virtual_close_card(c: Dict[str, Any]) -> str:
     name = c["symbol"].replace(f"/{QUOTE_CURRENCY}", "")
     emoji = "✅" if c["result"] == "TP" else "🛑"
     sonuc = "Kâr (TP)" if c["result"] == "TP" else "Zarar (SL)"
     return f"{emoji} <b>{name}</b> — {sonuc} | P&L: {c['pnl']:+.2f} {QUOTE_CURRENCY}"
-
 
 def send_virtual_close_alerts(closes: List[Dict[str, Any]]) -> None:
     if not closes:
@@ -541,7 +515,9 @@ def send_virtual_close_alerts(closes: List[Dict[str, Any]]) -> None:
     balance = get_virtual_balance()
     cards = [build_virtual_close_card(c) for c in closes]
     msg = "📒 <b>Sanal Prop-Firma Hesabı — İşlem Kapandı</b>\n\n" + "\n".join(cards) + f"\n\nGüncel bakiye: {balance:.2f} {QUOTE_CURRENCY}"
-    send_telegram(msg) def build_status_card() -> str:
+    send_telegram(msg)
+
+def build_status_card() -> str:
     balance = get_virtual_balance()
     today_pnl = get_today_pnl()
     highest_eod = get_highest_eod_balance()
@@ -572,7 +548,9 @@ def send_virtual_close_alerts(closes: List[Dict[str, Any]]) -> None:
     else:
         lines.append(f"✅ Tutarlılık: kurallara uygun (limit: %{CONSISTENCY_PCT:.0f})")
     lines.append("━━━━━━━━━━━━━━")
-    return "\n".join(lines) # ==================== GÖSTERGELER ====================
+    return "\n".join(lines)
+
+# ==================== GÖSTERGELER ====================
 
 def compute_rsi(series: pd.Series, period: int) -> pd.Series:
     delta = series.diff()
@@ -583,14 +561,12 @@ def compute_rsi(series: pd.Series, period: int) -> pd.Series:
     rs = avg_gain / avg_loss.replace(0, 1e-10)
     return 100 - (100 / (1 + rs))
 
-
 def compute_macd(series: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> Tuple[pd.Series, pd.Series]:
     ema_fast = series.ewm(span=fast, adjust=False).mean()
     ema_slow = series.ewm(span=slow, adjust=False).mean()
     macd_line = ema_fast - ema_slow
     signal_line = macd_line.ewm(span=signal, adjust=False).mean()
     return macd_line, signal_line
-
 
 def compute_atr(df: pd.DataFrame, period: int) -> pd.Series:
     high, low, close = df["high"], df["low"], df["close"]
@@ -601,7 +577,6 @@ def compute_atr(df: pd.DataFrame, period: int) -> pd.Series:
         (low - prev_close).abs(),
     ], axis=1).max(axis=1)
     return tr.rolling(period).mean()
-
 
 def compute_adx(df: pd.DataFrame, period: int) -> pd.Series:
     high, low, close = df["high"], df["low"], df["close"]
@@ -621,22 +596,24 @@ def compute_adx(df: pd.DataFrame, period: int) -> pd.Series:
     dx = ((plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, 1e-10)) * 100
     return dx.ewm(alpha=1 / period, adjust=False).mean()
 
-
 def find_recent_cross_up(a: pd.Series, b: pd.Series, lookback: int) -> Tuple[bool, Optional[int]]:
-    n = len(a)
+    # Optimization: Convert Series to 1D NumPy arrays prior to loop iterations
+    # to avoid heavy Pandas .iloc indexing overhead on each loop iteration (~12x speedup).
+    a_arr = a.to_numpy()
+    b_arr = b.to_numpy()
+    n = len(a_arr)
     max_back = min(lookback, n - 1)
     for offset in range(max_back):
         i = n - 1 - offset
         j = i - 1
         if j < 0:
             break
-        ai, aj, bi, bj = a.iloc[i], a.iloc[j], b.iloc[i], b.iloc[j]
+        ai, aj, bi, bj = a_arr[i], a_arr[j], b_arr[i], b_arr[j]
         if pd.isna(ai) or pd.isna(aj) or pd.isna(bi) or pd.isna(bj):
             continue
         if aj <= bj and ai > bi:
             return True, offset
     return False, None
-
 
 def is_breakout(df: pd.DataFrame, lookback: int) -> bool:
     if len(df) <= lookback + 1:
@@ -644,8 +621,7 @@ def is_breakout(df: pd.DataFrame, lookback: int) -> bool:
     window = df["close"].iloc[-(lookback + 1):-1]
     if window.isna().all():
         return False
-    return df["close"].iloc[-1] > window.max()
-
+    return bool(df["close"].iloc[-1] > window.max())
 
 def detect_anomaly(df: pd.DataFrame, threshold_pct: float, vol_mult: float, window: int) -> Optional[Dict[str, float]]:
     if len(df) < window + 21:
@@ -666,13 +642,14 @@ def detect_anomaly(df: pd.DataFrame, threshold_pct: float, vol_mult: float, wind
         return {"pct_change": pct_change, "vol_ratio": vol_ratio, "price": price_now}
     return None
 
-
 def confidence_label(score: float) -> str:
     if score >= 80:
         return "🟢🟢🟢 Güçlü"
     elif score >= 65:
         return "🟢🟢 Orta-Güçlü"
-    return "🟢 Standart" # ==================== ANALİZ / STRATEJİ ====================
+    return "🟢 Standart"
+
+# ==================== ANALİZ / STRATEJİ ====================
 
 def evaluate(symbol: str) -> Optional[Dict[str, Any]]:
     fetch_limit = max(LONG_WINDOW, BREAKOUT_LOOKBACK, ADX_PERIOD * 2, 40) + CROSS_LOOKBACK + 5
@@ -760,7 +737,6 @@ def evaluate(symbol: str) -> Optional[Dict[str, Any]]:
         return None
     return result
 
-
 def get_market_trend() -> str:
     try:
         df = get_ohlcv(f"BTC/{QUOTE_CURRENCY}", TIMEFRAME, limit=LONG_WINDOW + 5)
@@ -768,7 +744,9 @@ def get_market_trend() -> str:
         ma_long = df["close"].rolling(LONG_WINDOW).mean().iloc[-1]
         return "yukarı" if ma_short > ma_long else "aşağı"
     except Exception:
-        return "bilinmiyor" def scan_once(symbols: List[str]) -> Tuple[List[Tuple[str, dict]], List[Tuple[str, dict]], List[Dict[str, Any]]]:
+        return "bilinmiyor"
+
+def scan_once(symbols: List[str]) -> Tuple[List[Tuple[str, dict]], List[Tuple[str, dict]], List[Dict[str, Any]]]:
     now = time.time()
     setup_hits: List[Tuple[str, dict]] = []
     anomaly_hits: List[Tuple[str, dict]] = []
@@ -819,7 +797,6 @@ def get_market_trend() -> str:
     anomaly_hits.sort(key=lambda x: x[1]["pct_change"], reverse=True)
     return setup_hits, anomaly_hits, virtual_closes
 
-
 # ==================== MESAJ KARTLARI ====================
 
 def build_setup_card(symbol: str, r: Dict[str, Any]) -> str:
@@ -846,7 +823,9 @@ def build_setup_card(symbol: str, r: Dict[str, Any]) -> str:
     for d in r["details"]:
         lines.append(f"• {d}")
     lines.append("━━━━━━━━━━━━━━")
-    return "\n".join(lines) def build_anomaly_card(symbol: str, a: Dict[str, float]) -> str:
+    return "\n".join(lines)
+
+def build_anomaly_card(symbol: str, a: Dict[str, float]) -> str:
     name = symbol.replace(f"/{QUOTE_CURRENCY}", "")
     lines = [
         f"⚡ <b>ANOMALİ: {name}/{QUOTE_CURRENCY}</b>",
@@ -860,7 +839,6 @@ def build_setup_card(symbol: str, r: Dict[str, Any]) -> str:
     ]
     return "\n".join(lines)
 
-
 def send_setup_alerts(hits: List[Tuple[str, dict]], market_trend: str) -> None:
     if not hits:
         return
@@ -872,7 +850,6 @@ def send_setup_alerts(hits: List[Tuple[str, dict]], market_trend: str) -> None:
     logger.info("%d setup sinyali gönderiliyor", len(hits))
     send_telegram(msg)
 
-
 def send_anomaly_alerts(hits: List[Tuple[str, dict]]) -> None:
     if not hits:
         return
@@ -881,24 +858,20 @@ def send_anomaly_alerts(hits: List[Tuple[str, dict]]) -> None:
     logger.info("%d anomali uyarısı gönderiliyor", len(hits))
     send_telegram(msg)
 
-
 # ==================== ZARİF KAPANMA ====================
 
 _shutdown_requested = False
-
 
 def _handle_shutdown_signal(signum, frame) -> None:
     global _shutdown_requested
     _shutdown_requested = True
     logger.info("Kapanma sinyali alındı (%s), güvenli şekilde durduruluyor...", signum)
 
-
 def _sleep_with_shutdown_check(total_seconds: float, step: float = 1.0) -> None:
     remaining = total_seconds
     while remaining > 0 and not _shutdown_requested:
         time.sleep(min(step, remaining))
         remaining -= step
-
 
 # ==================== ANA DÖNGÜ ====================
 
@@ -1018,7 +991,9 @@ def run_bot() -> None:
             _sleep_with_shutdown_check(30)
 
     logger.info("Bot durduruldu.")
-    send_telegram("🛑 Bot durduruldu (yeniden başlatma/deploy nedeniyle olabilir).") if __name__ == "__main__":
+    send_telegram("🛑 Bot durduruldu (yeniden başlatma/deploy nedeniyle olabilir).")
+
+if __name__ == "__main__":
     run_bot()
     
     

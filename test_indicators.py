@@ -10,8 +10,9 @@ bota hiçbir etkisi yoktur. Sadece kendi bilgisayarında matematiğin doğru
     pytest test_indicators.py
 """
 
+import numpy as np
 import pandas as pd
-from kripto_bot import compute_rsi, is_breakout, find_recent_cross_up
+from kripto_bot import compute_rsi, is_breakout, find_recent_cross_up, compute_atr, compute_adx
 
 
 def test_rsi_all_gains_is_near_100():
@@ -51,3 +52,34 @@ def test_find_recent_cross_up_no_crossover():
     b = pd.Series([2.0, 2.0, 2.0, 2.0])
     found, offset = find_recent_cross_up(a, b, lookback=3)
     assert found is False
+
+
+def test_compute_atr_values():
+    df = pd.DataFrame({
+        "high": [10.0, 12.0, 11.0],
+        "low": [8.0, 9.0, 8.5],
+        "close": [9.0, 11.0, 10.0],
+    })
+    atr = compute_atr(df, period=2)
+    # Row 0: TR = 10 - 8 = 2.0 (no prev close)
+    # Row 1: TR = max(12-9, |12-9|, |9-9|) = 3.0
+    # Row 2: TR = max(11-8.5, |11-11|, |8.5-11|) = max(2.5, 0, 2.5) = 2.5
+    # Rolling mean period=2:
+    # Row 0: NaN
+    # Row 1: (2.0 + 3.0) / 2 = 2.5
+    # Row 2: (3.0 + 2.5) / 2 = 2.75
+    assert np.isnan(atr.iloc[0])
+    assert np.isclose(atr.iloc[1], 2.5)
+    assert np.isclose(atr.iloc[2], 2.75)
+
+
+def test_compute_adx_returns_valid_series():
+    highs = [10.0 + i * 0.5 for i in range(40)]
+    lows = [8.0 + i * 0.5 for i in range(40)]
+    closes = [9.0 + i * 0.5 for i in range(40)]
+    df = pd.DataFrame({"high": highs, "low": lows, "close": closes})
+    adx = compute_adx(df, period=14)
+    assert len(adx) == 40
+    # Strong upward trend should have positive ADX value
+    assert not pd.isna(adx.iloc[-1])
+    assert adx.iloc[-1] > 0
